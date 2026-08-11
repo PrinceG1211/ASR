@@ -6,34 +6,34 @@
 
 @layer base {
   :root {
-    --background: 195 17% 8%;
-    --foreground: 94 24% 94%;
-    --card: 192 15% 11%;
-    --card-foreground: 94 24% 94%;
-    --popover: 192 15% 11%;
-    --popover-foreground: 94 24% 94%;
-    --primary: 80 72% 66%;
-    --primary-foreground: 84 31% 10%;
-    --secondary: 192 12% 16%;
-    --secondary-foreground: 94 24% 94%;
-    --muted: 192 12% 16%;
-    --muted-foreground: 195 8% 52%;
-    --accent: 192 12% 16%;
-    --accent-foreground: 94 24% 94%;
-    --destructive: 8 72% 65%;
-    --destructive-foreground: 94 24% 94%;
-    --border: 192 12% 20%;
-    --input: 192 12% 20%;
-    --ring: 80 72% 66%;
-    --radius: 0.75rem;
-    --sidebar-background: 195 17% 9%;
-    --sidebar-foreground: 94 24% 94%;
-    --sidebar-primary: 80 72% 66%;
-    --sidebar-primary-foreground: 84 31% 10%;
-    --sidebar-accent: 192 12% 16%;
-    --sidebar-accent-foreground: 94 24% 94%;
-    --sidebar-border: 192 12% 20%;
-    --sidebar-ring: 80 72% 66%;
+    --background: 226 39% 7%;
+    --foreground: 224 38% 96%;
+    --card: 225 36% 13%;
+    --card-foreground: 224 38% 96%;
+    --popover: 225 36% 13%;
+    --popover-foreground: 224 38% 96%;
+    --primary: 183 77% 65%;
+    --primary-foreground: 225 57% 9%;
+    --secondary: 223 34% 19%;
+    --secondary-foreground: 224 38% 96%;
+    --muted: 223 34% 19%;
+    --muted-foreground: 221 18% 58%;
+    --accent: 223 34% 19%;
+    --accent-foreground: 224 38% 96%;
+    --destructive: 337 88% 74%;
+    --destructive-foreground: 224 38% 96%;
+    --border: 223 29% 24%;
+    --input: 223 29% 24%;
+    --ring: 183 77% 65%;
+    --radius: 0.9rem;
+    --sidebar-background: 226 39% 9%;
+    --sidebar-foreground: 224 38% 96%;
+    --sidebar-primary: 183 77% 65%;
+    --sidebar-primary-foreground: 225 57% 9%;
+    --sidebar-accent: 223 34% 19%;
+    --sidebar-accent-foreground: 224 38% 96%;
+    --sidebar-border: 223 29% 24%;
+    --sidebar-ring: 183 77% 65%;
   }
 
   * {
@@ -41,7 +41,7 @@
   }
 
   html {
-    background: #101516;
+    background: #0b1020;
   }
 
   body {
@@ -74,6 +74,21 @@
     to { opacity: 1; transform: translateY(0); }
   }
 
+  @keyframes gradient-drift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  @keyframes orb-float {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50% { transform: translate3d(0, -14px, 0) scale(1.05); }
+  }
+
+  @keyframes shimmer {
+    0% { transform: translateX(-120%); }
+    100% { transform: translateX(120%); }
+  }
+
   @keyframes pulse-ring {
     0%, 100% { box-shadow: 0 0 0 0 rgb(157 230 106 / 0.18); }
     50% { box-shadow: 0 0 0 8px rgb(157 230 106 / 0); }
@@ -90,6 +105,32 @@
 
   .recording-pulse {
     animation: pulse-ring 1.6s ease-in-out infinite;
+  }
+
+  .gradient-drift {
+    background-size: 180% 180%;
+    animation: gradient-drift 12s ease-in-out infinite;
+  }
+
+  .hero-orb {
+    animation: orb-float 7s ease-in-out infinite;
+  }
+
+  .hero-orb-delay {
+    animation-delay: -3s;
+  }
+
+  .shimmer-line {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer-line::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.16), transparent);
+    animation: shimmer 3.2s ease-in-out infinite;
   }
 
   .wave-breathe {
