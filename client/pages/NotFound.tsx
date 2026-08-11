@@ -1,24 +1,15 @@
-import { useLocation } from "react-router-dom";
-import { useEffect } from "react";
+import { ArrowLeft, SearchX } from "lucide-react";
+import { Link } from "react-router-dom";
 
 const NotFound = () => {
-  const location = useLocation();
-
-  useEffect(() => {
-    console.error(
-      "404 Error: User attempted to access non-existent route:",
-      location.pathname,
-    );
-  }, [location.pathname]);
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">404</h1>
-        <p className="text-xl text-gray-600 mb-4">Oops! Page not found</p>
-        <a href="/" className="text-blue-500 hover:text-blue-700 underline">
-          Return to Home
-        </a>
+    <div className="flex min-h-screen items-center justify-center bg-[#101516] px-6 text-[#eef2e8]">
+      <div className="max-w-md text-center">
+        <div className="mx-auto mb-6 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#b9e769]/10 text-[#b9e769]"><SearchX size={22} /></div>
+        <p className="mb-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#a8c76d]">sonora/lab</p>
+        <h1 className="text-3xl font-semibold tracking-[-0.04em]">This route is out of range.</h1>
+        <p className="mt-3 text-sm leading-6 text-[#818b8c]">The workspace you’re looking for doesn’t exist yet. Return to the overview to continue your research.</p>
+        <Link to="/" className="mt-7 inline-flex items-center gap-2 rounded-lg bg-[#b9e769] px-4 py-2.5 text-xs font-bold text-[#172013] transition hover:bg-[#c9f27d]"><ArrowLeft size={14} />Back to overview</Link>
       </div>
     </div>
   );
