@@ -211,10 +211,39 @@ function detectSpokenLanguage(text: string) {
   return { value: "en-US", label: "English · Latin script" };
 }
 
+const nameTranslations: Record<string, string> = {
+  "hi-IN": "मेरा नाम $1 है",
+  "es-ES": "Me llamo $1",
+  "fr-FR": "Je m'appelle $1",
+  "de-DE": "Ich heiße $1",
+  "pt-BR": "Meu nome é $1",
+  "ar-SA": "اسمي $1",
+  "zh-CN": "我的名字是$1",
+  "ja-JP": "私の名前は$1です",
+  "ko-KR": "제 이름은 $1입니다",
+  "ru-RU": "Меня зовут $1",
+  "it-IT": "Mi chiamo $1",
+  "tr-TR": "Benim adım $1",
+  "id-ID": "Nama saya $1",
+};
+
 function translateTranscript(text: string, targetLanguage: string) {
-  if (!text.trim()) return "Waiting for a transcript…";
+  const trimmedText = text.trim();
+  if (!trimmedText) return "Waiting for a transcript…";
   if (targetLanguage === "en-US") return text;
-  return translationSamples[targetLanguage] || `[Translation preview] ${text}`;
+
+  const normalizedText = trimmedText.toLowerCase().replace(/\s+/g, " ");
+  const weatherSample = "the weather is lovely today, and the light is perfect for a walk.";
+  if (normalizedText === weatherSample && translationSamples[targetLanguage]) return translationSamples[targetLanguage];
+
+  const nameTranslation = nameTranslations[targetLanguage];
+  if (nameTranslation) {
+    const translatedName = text.replace(/\bmy name is\s+([a-z][a-z'-]*)\b/gi, nameTranslation);
+    if (translatedName !== text) return translatedName;
+  }
+
+  const targetLabel = languages.find((language) => language.value === targetLanguage)?.label ?? targetLanguage;
+  return `[${targetLabel} preview] ${text}`;
 }
 
 type SpeechRecognitionEventLike = Event & { results: { length: number; [index: number]: { [index: number]: { transcript: string } } } };
