@@ -483,7 +483,7 @@ function ResultsView() {
 export default function Index() {
   const [session, setSession] = useState<Session | null>(() => readSession());
   const [evaluations, setEvaluations] = useState<EvaluationRecord[]>(() => readEvaluations());
-  const [activeView, setActiveView] = useState<View>("home");
+  const [activeView, setActiveView] = useState<View>(() => readSession()?.role === "admin" ? "admin" : "home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedAccent, setSelectedAccent] = useState("scot");
   const [fileName, setFileName] = useState("");
@@ -529,7 +529,7 @@ export default function Index() {
     toast.success("You have been signed out.");
   };
 
-  if (!session) return <AuthScreen onAuthenticated={setSession} />;
+  if (!session) return <AuthScreen onAuthenticated={(nextSession) => { setSession(nextSession); setActiveView(nextSession.role === "admin" ? "admin" : "home"); }} />;
   if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} goTo={goTo} logout={logout} />;
   if (session.role === "client" && activeView === "home") return <ClientDashboard session={session} evaluations={evaluations} goTo={goTo} logout={logout} downloadTextFile={downloadTextFile} />;
 
