@@ -501,8 +501,18 @@ function ClientTranslateView({ transcript, setTranscript }: Pick<ClientWorkspace
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const detectedAudioUrlRef = useRef("");
   const detectedLanguage = detectSpokenLanguage(transcript);
   const targetOptions = languages.filter((item) => item.value !== "auto");
+
+  useEffect(() => {
+    if (!audioUrl || detectedAudioUrlRef.current === audioUrl || !transcript.trim()) return;
+    const detected = detectSpokenLanguage(transcript);
+    if (detected.value === "unknown") return;
+    detectedAudioUrlRef.current = audioUrl;
+    setTargetLanguage(detected.value);
+    toast.success(`Language detected: ${detected.label}.`);
+  }, [audioUrl, transcript]);
 
   useEffect(() => {
     if (!recording) return;
