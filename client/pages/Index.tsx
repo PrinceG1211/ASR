@@ -225,12 +225,32 @@ const nameTranslations: Record<string, string> = {
   "it-IT": "Mi chiamo $1",
   "tr-TR": "Benim adım $1",
   "id-ID": "Nama saya $1",
+  "en-GB": "My name is $1",
+  "sw-KE": "Jina langu ni $1",
+  "bn-BD": "আমার নাম $1",
+  "ta-IN": "என் பெயர் $1",
+  "yo-NG": "Orúkọ mi ni $1",
+  "nl-NL": "Mijn naam is $1",
+  "pl-PL": "Mam na imię $1",
+  "uk-UA": "Мене звати $1",
+  "vi-VN": "Tên tôi là $1",
+  "th-TH": "ฉันชื่อ $1",
+  "fa-IR": "نام من $1 است",
+  "ur-PK": "میرا نام $1 ہے",
+  "gu-IN": "મારું નામ $1 છે",
+  "te-IN": "నా పేరు $1",
+  "mr-IN": "माझे नाव $1 आहे",
+  "pa-IN": "ਮੇਰਾ ਨਾਮ $1 ਹੈ",
+  "am-ET": "ስሜ $1 ነው",
+  "ha-NG": "Sunana $1",
+  "zu-ZA": "Igama lami ngu-$1",
+  "fil-PH": "Ang pangalan ko ay $1",
 };
 
 function translateTranscript(text: string, targetLanguage: string) {
   const trimmedText = text.trim();
   if (!trimmedText) return "Waiting for a transcript…";
-  if (targetLanguage === "en-US") return text;
+  if (targetLanguage === "en-US" || targetLanguage === "en-GB") return text;
 
   const normalizedText = trimmedText.toLowerCase().replace(/\s+/g, " ");
   const weatherSample = "the weather is lovely today, and the light is perfect for a walk.";
