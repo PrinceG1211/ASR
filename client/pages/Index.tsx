@@ -494,12 +494,101 @@ type ClientWorkspaceProps = {
 
 function ClientTranslateView({ transcript, setTranscript }: Pick<ClientWorkspaceProps, "transcript" | "setTranscript">) {
   const [targetLanguage, setTargetLanguage] = useState("en-US");
+  const [recording, setRecording] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
+  const [recordingError, setRecordingError] = useState("");
+  const [audioUrl, setAudioUrl] = useState("");
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const detectedLanguage = detectSpokenLanguage(transcript);
   const targetOptions = languages.filter((item) => item.value !== "auto");
+
+  useEffect(() => {
+    if (!recording) return;
+    const timer = window.setInterval(() => setRecordingSeconds((seconds) => seconds + 1), 1000);
+    return () => window.clearInterval(timer);
+  }, [recording]);
+
+  useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    recognitionRef.current?.stop();
+  }, []);
+
+  useEffect(() => () => {
+    if (audioUrl) URL.revokeObjectURL(audioUrl);
+  }, [audioUrl]);
+
+  const startRecording = async () => {
+    setRecordingError("");
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
+      setRecordingError("Live recording is not supported in this browser.");
+      toast.error("This browser does not provide microphone recording.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+        setRecording(false);
+        setRecordingSeconds(0);
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        if (blob.size < 1000) {
+          setAudioUrl("");
+          toast.error("That recording was empty. Speak for a moment and try again.");
+          return;
+        }
+        setAudioUrl(URL.createObjectURL(blob));
+        toast.success(`Recorded ${(blob.size / 1024).toFixed(0)} KB of audio.`);
+      };
+      streamRef.current = stream;
+      recorderRef.current = recorder;
+      setTranscript("");
+      setRecordingSeconds(0);
+      setRecording(true);
+      recorder.start();
+
+      const Recognition = getSpeechRecognition();
+      if (Recognition) {
+        const recognition = new Recognition();
+        recognition.lang = navigator.language || "en-US";
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.onresult = (event) => {
+          let nextTranscript = "";
+          for (let index = 0; index < event.results.length; index += 1) nextTranscript += event.results[index][0].transcript;
+          setTranscript(nextTranscript);
+        };
+        recognition.onerror = () => toast.info("Speech recognition stopped. Your audio recording is still available.");
+        recognitionRef.current = recognition;
+        recognition.start();
+      }
+      toast.success("Microphone is live. Start speaking.");
+    } catch {
+      setRecordingError("Microphone access was denied. Allow microphone access and try again.");
+      toast.error("Microphone access is required to record audio.");
+    }
+  };
+
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recognitionRef.current?.stop();
+    recorderRef.current = null;
+    recognitionRef.current = null;
+  };
 
   return <div className="page-enter">
     <div className="mb-7"><SectionEyebrow color="lavender">Transcript workspace</SectionEyebrow><h1 className="text-[29px] font-semibold tracking-[-0.05em] text-[#f0f5ed]">Translate transcript to</h1><p className="mt-2 max-w-xl text-[12px] leading-5 text-[#829092]">Paste or edit a transcript, then choose the language you want to read it in.</p></div>
     <section className="rounded-[24px] border border-[#a78bfa]/20 bg-[linear-gradient(145deg,#1a2140,#15172f)] p-5 shadow-[0_20px_60px_rgba(7,20,48,0.2)] sm:p-6">
+      <div className="mb-5 flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#c4b5fd]">Audio input</p><h2 className="mt-1 text-[18px] font-semibold tracking-[-0.03em] text-[#f4f7ff]">Record your voice</h2><p className="mt-1 text-[11px] text-[#8fa1c0]">Capture a live sample and turn it into editable speech.</p></div><div className={`flex h-10 w-10 items-center justify-center rounded-xl ${recording ? "recording-pulse bg-[#ff9b9b]/15 text-[#ff9b9b]" : "bg-[#a78bfa]/10 text-[#c4b5fd]"}`}><Mic size={18} /></div></div>
+      <div className="flex flex-col gap-3 rounded-2xl border border-white/[0.08] bg-[#121a32] p-4 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-center gap-3"><div className="flex h-9 w-9 items-center justify-center rounded-full bg-[#63e6e9]/10 text-[#63e6e9]"><Waves size={16} /></div><div><p className="text-[11px] font-semibold text-[#dce6de]">{recording ? "Recording in progress" : audioUrl ? "Recording ready" : "Ready to record"}</p><p className="mt-1 font-mono text-[10px] text-[#7f91b2]">{formatDuration(recordingSeconds)}{recording ? " · microphone live" : " · max 25 MB"}</p></div></div><button onClick={() => { if (recording) stopRecording(); else void startRecording(); }} className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-[10px] font-bold transition ${recording ? "bg-[#ff7f88] text-[#24131b] hover:bg-[#ff9ba1]" : "bg-[#63e6e9] text-[#07171e] hover:bg-[#8ff7f2]"}`}>{recording ? <CircleStop size={14} /> : <Mic size={14} />}{recording ? "Stop recording" : "Record audio"}</button></div>
+      {recordingError && <p className="mt-3 text-[10px] text-[#ff9b9b]">{recordingError}</p>}
+      {audioUrl && <audio controls src={audioUrl} className="mt-3 h-9 w-full" />}
+      <div className="my-6 h-px bg-white/[0.07]" />
       <div className="mb-5 flex items-center justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-[0.15em] text-[#c4b5fd]">Language conversion</p><h2 className="mt-1 text-[18px] font-semibold tracking-[-0.03em] text-[#f4f7ff]">Choose your output language</h2></div><div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#a78bfa]/10 text-[#c4b5fd]"><Globe2 size={18} /></div></div>
       <label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#748083]" htmlFor="translate-target">Translate transcript to</label>
       <div className="relative"><select id="translate-target" value={targetLanguage} onChange={(event) => setTargetLanguage(event.target.value)} className="w-full appearance-none rounded-xl border border-white/[0.1] bg-[#1b2644] px-3 py-3 text-[11px] text-[#dce6de] outline-none transition focus:border-[#63e6e9]/60">{targetOptions.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><ChevronDown size={15} className="pointer-events-none absolute right-3 top-3.5 text-[#8796b4]" /></div>
