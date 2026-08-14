@@ -19,8 +19,11 @@ import {
   GitCompareArrows,
   Home,
   Info,
+  KeyRound,
   Layers3,
   Library,
+  LogIn,
+  LogOut,
   Menu,
   Mic,
   Pause,
@@ -28,6 +31,7 @@ import {
   Plus,
   RotateCcw,
   Settings2,
+  ShieldCheck,
   Sparkles,
   UploadCloud,
   Users,
@@ -37,7 +41,69 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-type View = "home" | "analyze" | "compare" | "results";
+type View = "home" | "analyze" | "compare" | "results" | "admin";
+type UserRole = "admin" | "client";
+
+type Session = {
+  id: string;
+  name: string;
+  email: string;
+  role: UserRole;
+};
+
+type StoredUser = Session & { password: string };
+
+type EvaluationRecord = {
+  id: string;
+  ownerName: string;
+  ownerEmail: string;
+  fileName: string;
+  accent: string;
+  language: string;
+  transcript: string;
+  status: "complete" | "failed";
+  createdAt: string;
+  baselineWer: string;
+  tunedWer: string;
+};
+
+const SESSION_KEY = "accentlens:session";
+const USERS_KEY = "accentlens:users";
+const EVALUATIONS_KEY = "accentlens:evaluations";
+
+function createId() {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+}
+
+function readStoredUsers(): StoredUser[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(USERS_KEY) || "[]") as StoredUser[];
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
+
+function readSession(): Session | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(SESSION_KEY) || "null") as Session | null;
+    return saved?.id && saved?.role ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+function readEvaluations(): EvaluationRecord[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const saved = JSON.parse(window.localStorage.getItem(EVALUATIONS_KEY) || "[]") as EvaluationRecord[];
+    return Array.isArray(saved) ? saved : [];
+  } catch {
+    return [];
+  }
+}
 
 type Accent = {
   id: string;
@@ -68,6 +134,9 @@ const demoSamples = [
   { name: "Could you send the report over?", accent: "Indian English", duration: "00:05" },
   { name: "We are meeting after lunch", accent: "Nigerian English", duration: "00:04" },
 ];
+
+const MAX_AUDIO_SIZE = 25 * 1024 * 1024;
+const AUDIO_EXTENSIONS = /\.(wav|mp3|m4a|aac|ogg|flac|webm)$/i;
 
 const languages = [
   { value: "auto", label: "Auto-detect language" },
@@ -118,6 +187,53 @@ function downloadTextFile(fileName: string, content: string) {
   toast.success(`${fileName} downloaded.`);
 }
 
+function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: Session) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const completeAuth = (session: Session) => {
+    window.localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    toast.success(mode === "register" ? "Account created. Welcome to AccentLens." : "Welcome back to AccentLens.");
+    onAuthenticated(session);
+  };
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!normalizedEmail || password.length < 6) {
+      setError("Enter a valid email and a password with at least 6 characters.");
+      return;
+    }
+    if (mode === "register") {
+      if (!name.trim()) { setError("Add your name to create an account."); return; }
+      if (password !== confirmPassword) { setError("Passwords do not match."); return; }
+      const users = readStoredUsers();
+      if (users.some((user) => user.email === normalizedEmail) || normalizedEmail === "admin@accentlens.ai") {
+        setError("An account with this email already exists.");
+        return;
+      }
+      const user: StoredUser = { id: createId(), name: name.trim(), email: normalizedEmail, role: "client", password };
+      window.localStorage.setItem(USERS_KEY, JSON.stringify([...users, user]));
+      completeAuth({ id: user.id, name: user.name, email: user.email, role: user.role });
+      return;
+    }
+    const adminMatches = normalizedEmail === "admin@accentlens.ai" && password === "admin123";
+    const client = readStoredUsers().find((user) => user.email === normalizedEmail && user.password === password);
+    if (!adminMatches && !client) {
+      setError("Email or password is incorrect. Use the demo admin credentials or register as a client.");
+      return;
+    }
+    completeAuth(adminMatches ? { id: "demo-admin", name: "AccentLens Admin", email: normalizedEmail, role: "admin" } : { id: client!.id, name: client!.name, email: client!.email, role: "client" });
+  };
+
+  return <div className="min-h-screen overflow-hidden bg-[#0b1020] px-5 py-8 text-[#f4f7ff] sm:px-8"><div className="pointer-events-none fixed -left-24 -top-24 h-80 w-80 rounded-full bg-[#63e6e9]/10 blur-3xl" /><div className="pointer-events-none fixed -bottom-24 -right-24 h-96 w-96 rounded-full bg-[#a78bfa]/15 blur-3xl" /><div className="relative mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl items-center gap-8 lg:grid-cols-[1.05fr_0.95fr]"><div className="hidden lg:block"><div className="mb-8 flex items-center gap-3"><LogoMark /><div><p className="text-[15px] font-bold tracking-[-0.03em]">accent<span className="text-[#63e6e9]">/</span>lens</p><p className="text-[9px] uppercase tracking-[0.16em] text-[#7483a4]">ASR bias lab</p></div></div><p className="mb-5 text-[10px] font-bold uppercase tracking-[0.2em] text-[#9ee7e9]">Speech intelligence workspace</p><h1 className="max-w-xl text-5xl font-semibold leading-[1.03] tracking-[-0.06em] text-[#f4f7ff]">Measure every voice with <span className="bg-gradient-to-r from-[#63e6e9] via-[#a78bfa] to-[#fb7185] bg-clip-text text-transparent">more fairness.</span></h1><p className="mt-6 max-w-lg text-sm leading-7 text-[#94a2bd]">Evaluate accent bias, compare ASR models, and turn real audio into evidence your team can act on.</p><div className="mt-10 grid max-w-lg grid-cols-3 gap-3">{[{ value: "4", label: "accent groups" }, { value: "20+", label: "languages" }, { value: "2", label: "ASR models" }].map((item) => <div key={item.label} className="rounded-2xl border border-white/[0.08] bg-white/[0.04] p-4"><p className="text-2xl font-semibold text-[#f4f7ff]">{item.value}</p><p className="mt-1 text-[10px] text-[#7e8ca8]">{item.label}</p></div>)}</div></div><div className="mx-auto w-full max-w-md rounded-3xl border border-white/[0.1] bg-[#151d37]/90 p-6 shadow-[0_24px_100px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:p-8"><div className="mb-7 flex items-center gap-3 lg:hidden"><LogoMark /><div><p className="text-[15px] font-bold">accent<span className="text-[#63e6e9]">/</span>lens</p><p className="text-[9px] uppercase tracking-[0.16em] text-[#7483a4]">ASR bias lab</p></div></div><div className="mb-7"><div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#63e6e9]/20 to-[#a78bfa]/20 text-[#63e6e9]"><ShieldCheck size={19} /></div><h2 className="text-2xl font-semibold tracking-[-0.04em]">{mode === "login" ? "Welcome back" : "Create your account"}</h2><p className="mt-2 text-[11px] leading-5 text-[#8190ad]">{mode === "login" ? "Sign in to continue your audio evaluations." : "Create a client workspace to start testing speech models."}</p></div><form onSubmit={handleSubmit} className="space-y-4">{mode === "register" && <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#8795b1]">Full name</span><input value={name} onChange={(event) => setName(event.target.value)} className="w-full rounded-xl border border-white/[0.1] bg-[#1b2644] px-3.5 py-3 text-[12px] outline-none transition placeholder:text-[#566681] focus:border-[#63e6e9]/60" placeholder="Your name" /></label>}<label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#8795b1]">Email address</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} className="w-full rounded-xl border border-white/[0.1] bg-[#1b2644] px-3.5 py-3 text-[12px] outline-none transition placeholder:text-[#566681] focus:border-[#63e6e9]/60" placeholder="you@example.com" /></label><label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#8795b1]">Password</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} className="w-full rounded-xl border border-white/[0.1] bg-[#1b2644] px-3.5 py-3 text-[12px] outline-none transition placeholder:text-[#566681] focus:border-[#63e6e9]/60" placeholder="At least 6 characters" /></label>{mode === "register" && <label className="block"><span className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#8795b1]">Confirm password</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="w-full rounded-xl border border-white/[0.1] bg-[#1b2644] px-3.5 py-3 text-[12px] outline-none transition placeholder:text-[#566681] focus:border-[#63e6e9]/60" placeholder="Repeat password" /></label>}{error && <p className="rounded-xl border border-[#fb7185]/20 bg-[#fb7185]/10 px-3 py-2.5 text-[10px] leading-4 text-[#ffc1c5]">{error}</p>}<button type="submit" className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#63e6e9] to-[#a78bfa] px-4 py-3 text-[11px] font-bold text-[#07171e] transition hover:brightness-110"><LogIn size={15} />{mode === "login" ? "Sign in" : "Create client account"}</button></form>{mode === "login" && <button onClick={() => { setEmail("admin@accentlens.ai"); setPassword("admin123"); }} className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-[#63e6e9]/20 bg-[#63e6e9]/[0.05] px-3 py-2.5 text-[10px] font-semibold text-[#a7f3f2] hover:bg-[#63e6e9]/10"><KeyRound size={13} />Use demo admin access</button>}<div className="my-6 flex items-center gap-3 text-[9px] uppercase tracking-[0.16em] text-[#657493]"><span className="h-px flex-1 bg-white/[0.08]" />{mode === "login" ? "New to AccentLens?" : "Already have access?"}<span className="h-px flex-1 bg-white/[0.08]" /></div><button onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }} className="w-full rounded-xl border border-white/[0.1] px-4 py-3 text-[11px] font-semibold text-[#d7e2f4] transition hover:border-white/25">{mode === "login" ? "Register as a client" : "Back to sign in"}</button><p className="mt-6 text-center text-[9px] leading-4 text-[#667594]">Demo mode stores accounts only in this browser. Connect a secure auth backend before production use.</p></div></div></div>;
+}
+
 function LogoMark() {
   return <div className="relative flex h-9 w-9 items-center justify-center rounded-xl bg-[linear-gradient(135deg,#63e6e9,#a78bfa)] text-[#07171e] shadow-[0_0_30px_rgba(99,230,233,0.22)]"><Waves size={18} strokeWidth={2.6} /><span className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-[#fb7185]" /></div>;
 }
@@ -137,9 +253,22 @@ function Waveform({ compact = false }: { compact?: boolean }) {
   return <div className={`flex items-center gap-[3px] ${compact ? "h-8" : "h-14"}`}>{bars.map((height, index) => <span key={index} className={`w-[3px] rounded-full ${index < 28 ? "bg-[#63e6e9]" : "bg-[#66758e]"}`} style={{ height: `${compact ? Math.max(26, height * 0.55) : height}%`, opacity: index < 28 ? 0.9 : 0.6 }} />)}</div>;
 }
 
-function AudioPlayer({ fileName, onPlay, src }: { fileName: string; onPlay: () => void; src?: string }) {
+function formatDuration(seconds: number) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return "00:00";
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, "0");
+  const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${remainder}`;
+}
+
+function AudioPlayer({ fileName, onPlay, src, duration: fallbackDuration = 6 }: { fileName: string; onPlay: () => void; src?: string; duration?: number }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const [playing, setPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(fallbackDuration);
+  const [volume, setVolume] = useState(1);
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.volume = volume;
+  }, [volume]);
   const togglePlayback = async () => {
     if (audioRef.current) {
       if (audioRef.current.paused) await audioRef.current.play();
@@ -148,7 +277,7 @@ function AudioPlayer({ fileName, onPlay, src }: { fileName: string; onPlay: () =
     setPlaying((value) => !value);
     onPlay();
   };
-  return <div className="rounded-xl border border-white/[0.07] bg-[#1a2541] p-4"><audio ref={audioRef} src={src} onEnded={() => setPlaying(false)} className="hidden" /><div className="flex items-center gap-3"><button onClick={() => void togglePlayback()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#63e6e9] text-[#07171e] transition hover:bg-[#8ff7f2]">{playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-[11px] font-semibold text-[#e5ede4]">{fileName}</p><span className="font-mono text-[10px] text-[#778386]">00:06</span></div><div className="mt-2"><Waveform compact /></div></div></div></div>;
+  return <div className="rounded-xl border border-white/[0.07] bg-[#1a2541] p-4"><audio ref={audioRef} src={src} onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onEnded={() => { setPlaying(false); setCurrentTime(0); }} className="hidden" /><div className="flex items-center gap-3"><button onClick={() => void togglePlayback()} aria-label={playing ? "Pause audio" : "Play audio"} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#63e6e9] text-[#07171e] transition hover:bg-[#8ff7f2]">{playing ? <Pause size={15} fill="currentColor" /> : <Play size={15} fill="currentColor" />}</button><div className="min-w-0 flex-1"><div className="flex items-center justify-between gap-3"><p className="truncate text-[11px] font-semibold text-[#e5ede4]">{fileName}</p><span className="font-mono text-[10px] text-[#778386]">{formatDuration(currentTime)} / {formatDuration(duration)}</span></div><div className="mt-2"><Waveform compact /></div><input aria-label="Seek audio" type="range" min="0" max={duration || 1} step="0.1" value={Math.min(currentTime, duration || 1)} onChange={(event) => { const nextTime = Number(event.target.value); setCurrentTime(nextTime); if (audioRef.current) audioRef.current.currentTime = nextTime; }} className="mt-2 h-1 w-full cursor-pointer accent-[#63e6e9]" /><div className="mt-2 flex items-center justify-between gap-3"><span className="text-[9px] text-[#7786a2]">{src ? "Original audio" : "Preview waveform"}</span><label className="flex items-center gap-2 text-[9px] text-[#7786a2]">Volume<input aria-label="Audio volume" type="range" min="0" max="1" step="0.05" value={volume} onChange={(event) => setVolume(Number(event.target.value))} className="w-16 cursor-pointer accent-[#a78bfa]" /></label></div></div></div></div>;
 }
 
 function HomeView({ goTo }: { goTo: (view: View) => void }) {
@@ -163,7 +292,7 @@ function HomeView({ goTo }: { goTo: (view: View) => void }) {
   </>;
 }
 
-function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName, runAnalysis, analysisStatus }: { selectedAccent: string; setSelectedAccent: (value: string) => void; fileName: string; setFileName: (value: string) => void; runAnalysis: () => void; analysisStatus: string }) {
+function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName, runAnalysis, analysisStatus, transcript, setTranscript }: { selectedAccent: string; setSelectedAccent: (value: string) => void; fileName: string; setFileName: (value: string) => void; runAnalysis: (details: { transcript: string; accent: string; language: string }) => void; analysisStatus: string; transcript: string; setTranscript: (value: string) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -172,7 +301,6 @@ function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName,
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [showDemos, setShowDemos] = useState(false);
   const [language, setLanguage] = useState("auto");
-  const [liveTranscript, setLiveTranscript] = useState("");
   const [recordingError, setRecordingError] = useState("");
   const [audioUrl, setAudioUrl] = useState("");
   const activeAccent = accents.find((accent) => accent.id === selectedAccent) ?? accents[0];
@@ -201,7 +329,7 @@ function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName,
     recognition.onresult = (event) => {
       let transcript = "";
       for (let index = 0; index < event.results.length; index += 1) transcript += event.results[index][0].transcript;
-      setLiveTranscript(transcript);
+      setTranscript(transcript);
     };
     recognition.onerror = () => toast.info("Speech recognition stopped. You can still evaluate the recorded audio.");
     recognitionRef.current = recognition;
@@ -222,17 +350,23 @@ function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName,
       recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
       recorder.onstop = () => {
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-        setAudioUrl(URL.createObjectURL(blob));
-        setFileName(`live-recording-${new Date().toISOString().slice(11, 19).replace(/:/g, "-")}.webm`);
         setRecording(false);
         setRecordingSeconds(0);
         stream.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
+        if (blob.size < 1000) {
+          setFileName("");
+          setAudioUrl("");
+          toast.error("That recording was empty. Speak for a moment and try again.");
+          return;
+        }
+        setAudioUrl(URL.createObjectURL(blob));
+        setFileName(`live-recording-${new Date().toISOString().slice(11, 19).replace(/:/g, "-")}.webm`);
         toast.success(`Recorded ${(blob.size / 1024).toFixed(0)} KB of audio.`);
       };
       streamRef.current = stream;
       recorderRef.current = recorder;
-      setLiveTranscript("");
+      setTranscript("");
       setRecordingSeconds(0);
       setRecording(true);
       recorder.start();
@@ -260,8 +394,8 @@ function AnalyzeView({ selectedAccent, setSelectedAccent, fileName, setFileName,
     <div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><SectionEyebrow>Audio input & evaluation setup</SectionEyebrow><h1 className="text-[29px] font-semibold tracking-[-0.05em] text-[#f0f5ed]">Analyze an audio sample</h1><p className="mt-2 max-w-xl text-[12px] leading-5 text-[#829092]">Set up a controlled comparison between the pretrained baseline and the balanced fine-tuned model.</p></div><div className="flex items-center gap-2 text-[10px] text-[#758185]"><span className="h-1.5 w-1.5 rounded-full bg-[#63e6e9]" />Evaluation engine ready</div></div>
     <div className="mb-6 flex items-center gap-2 overflow-x-auto pb-1"><div className="flex shrink-0 items-center gap-2 text-[10px] font-semibold text-[#63e6e9]"><span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#63e6e9] text-[#07171e]">1</span>Audio input</div><span className="h-px w-8 shrink-0 bg-white/[0.1]" /><div className="flex shrink-0 items-center gap-2 text-[10px] text-[#8b9798]"><span className="flex h-6 w-6 items-center justify-center rounded-full border border-white/[0.15]">2</span>Accent labels</div><span className="h-px w-8 shrink-0 bg-white/[0.1]" /><div className="flex shrink-0 items-center gap-2 text-[10px] text-[#8b9798]"><span className="flex h-6 w-6 items-center justify-center rounded-full border border-white/[0.15]">3</span>Run evaluation</div></div>
     <div className="grid gap-5 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
-      <section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5 sm:p-6"><div className="mb-6 flex items-start justify-between"><div><h2 className="text-[15px] font-semibold text-[#f4f7ff]">Choose your audio</h2><p className="mt-1 text-[11px] text-[#7b878a]">Accepted formats: WAV, MP3, M4A · max 25 MB</p></div><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#63e6e9]/10 text-[#63e6e9]"><FileAudio size={16} /></div></div><input ref={inputRef} type="file" accept="audio/*,.wav,.mp3,.m4a" className="hidden" onChange={(event) => { const selectedFile = event.target.files?.[0]; if (selectedFile) { setAudioUrl(URL.createObjectURL(selectedFile)); setFileName(selectedFile.name); toast.success(`${selectedFile.name} added to this evaluation.`); } }} /><button onClick={() => inputRef.current?.click()} className="group flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#536264] bg-[#1b2644] px-5 py-8 transition hover:border-[#63e6e9]/60 hover:bg-[#22302c]"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#63e6e9]/10 text-[#63e6e9] transition group-hover:scale-105"><UploadCloud size={20} /></div><p className="text-[12px] font-semibold text-[#dce7dd]">Drop an audio file here</p><p className="mt-1 text-[10px] text-[#758184]">or click to browse from your device</p></button><div className="my-5 flex items-center gap-3 text-[9px] uppercase tracking-[0.15em] text-[#667276]"><span className="h-px flex-1 bg-white/[0.07]" />or use a sample<span className="h-px flex-1 bg-white/[0.07]" /></div><div className="grid grid-cols-2 gap-2"><button onClick={handleRecordClick} className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-[10px] font-semibold transition ${recording ? "recording-pulse border-[#fb7185]/40 bg-[#fb7185]/10 text-[#ffc1c5]" : "border-white/[0.1] text-[#c2cdc4] hover:border-white/[0.2]"}`}>{recording ? <CircleStop size={14} /> : <Mic size={14} />}{recording ? `Stop · 00:${String(recordingSeconds).padStart(2, "0")}` : "Record audio"}</button><button onClick={() => setShowDemos(!showDemos)} className="flex items-center justify-center gap-2 rounded-lg border border-white/[0.1] px-3 py-2.5 text-[10px] font-semibold text-[#c2cdc4] transition hover:border-white/[0.2]"><Library size={14} />Demo samples<ChevronDown size={12} className={`transition ${showDemos ? "rotate-180" : ""}`} /></button></div>{showDemos && <div className="mt-3 space-y-2 rounded-xl border border-white/[0.07] bg-[#1b2644] p-2">{demoSamples.map((sample) => <button key={sample.name} onClick={() => { setFileName(`${sample.accent.toLowerCase().replace(/ /g, "-")}-demo.wav`); setShowDemos(false); toast.success(`${sample.accent} demo loaded.`); }} className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/[0.05]"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#a78bfa]/10 text-[#a78bfa]"><Play size={11} fill="currentColor" /></span><span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-semibold text-[#dce6de]">{sample.name}</span><span className="text-[9px] text-[#748083]">{sample.accent} · {sample.duration}</span></span><ArrowRight size={12} className="text-[#657276]" /></button>)}</div>}{fileName && <div className="mt-5"><AudioPlayer fileName={fileName} src={audioUrl || undefined} onPlay={() => undefined} />{liveTranscript && <div className="mt-3 rounded-xl border border-[#67e8f9]/15 bg-[#67e8f9]/[0.04] p-3"><div className="mb-1 flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.14em] text-[#67e8f9]"><Activity size={11} />Live transcript</div><p className="text-[11px] leading-5 text-[#c5d6d1]">{liveTranscript}</p></div>}{recordingError && <p className="mt-2 text-[10px] text-[#ffc1c5]">{recordingError}</p>}</div>}</section>
-      <section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5 sm:p-6"><div className="mb-6 flex items-start justify-between"><div><h2 className="text-[15px] font-semibold text-[#f4f7ff]">Select accent labels</h2><p className="mt-1 text-[11px] text-[#7b878a]">Choose the accent group this sample belongs to.</p></div><button onClick={() => toast.info("Accent labels power the per-group WER and CER comparison.")} className="text-[#748083] hover:text-[#dce5de]"><Info size={16} /></button></div><label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#748083]">Spoken language</label><div className="relative mb-4"><select value={language} onChange={(event) => setLanguage(event.target.value)} className="w-full appearance-none rounded-lg border border-white/[0.09] bg-[#1b2644] px-3 py-2.5 text-[11px] text-[#dce6de] outline-none focus:border-[#63e6e9]/50">{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-3 text-[#718083]" /></div><div className="grid gap-2 sm:grid-cols-2">{accents.map((accent) => <button key={accent.id} onClick={() => setSelectedAccent(accent.id)} className={`relative rounded-xl border p-3 text-left transition ${selectedAccent === accent.id ? "border-[#63e6e9]/50 bg-[#63e6e9]/[0.07]" : "border-white/[0.07] bg-[#1b2644] hover:border-white/[0.16]"}`}><div className="flex items-start justify-between gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ color: accent.color, backgroundColor: `${accent.color}18` }}><Users size={14} /></span>{selectedAccent === accent.id && <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#63e6e9] text-[#07171e]"><Check size={10} strokeWidth={3} /></span>}</div><p className="mt-3 text-[11px] font-semibold text-[#dce6de]">{accent.name}</p><p className="mt-1 text-[9px] text-[#718084]">{accent.region}</p><p className="mt-3 font-mono text-[9px] text-[#85918f]">{accent.samples}</p></button>)}</div><div className="mt-5 rounded-xl border border-[#ff9b9b]/15 bg-[#ff9b9b]/[0.04] p-3"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeAccent.color }} /><span className="text-[10px] font-semibold text-[#d7dfd6]">Selected: {activeAccent.name}</span></div><p className="mt-1.5 text-[10px] leading-4 text-[#85918b]">This label will be used for per-accent WER and CER reporting.</p></div><button onClick={runAnalysis} disabled={!fileName || analysisStatus === "running"} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#63e6e9] px-4 py-3 text-[11px] font-bold text-[#07171e] transition hover:bg-[#8ff7f2] disabled:cursor-not-allowed disabled:opacity-40">{analysisStatus === "running" ? <><RotateCcw size={14} className="animate-spin" />Running baseline & fine-tuned models…</> : analysisStatus === "complete" ? <><CheckCircle2 size={14} />Analysis complete — view comparison</> : <><Zap size={14} />Run bias evaluation</>}</button></section>
+      <section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5 sm:p-6"><div className="mb-6 flex items-start justify-between"><div><h2 className="text-[15px] font-semibold text-[#f4f7ff]">Choose your audio</h2><p className="mt-1 text-[11px] text-[#7b878a]">Accepted formats: WAV, MP3, M4A · max 25 MB</p></div><div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#63e6e9]/10 text-[#63e6e9]"><FileAudio size={16} /></div></div><input ref={inputRef} type="file" accept="audio/*,.wav,.mp3,.m4a" className="hidden" onChange={(event) => { const selectedFile = event.target.files?.[0]; if (!selectedFile) return; const validType = selectedFile.type.startsWith("audio/") || AUDIO_EXTENSIONS.test(selectedFile.name); if (!validType) { toast.error("Choose a supported audio file: WAV, MP3, M4A, AAC, OGG, FLAC, or WebM."); event.currentTarget.value = ""; return; } if (selectedFile.size > MAX_AUDIO_SIZE) { toast.error("Audio files must be smaller than 25 MB."); event.currentTarget.value = ""; return; } setAudioUrl(URL.createObjectURL(selectedFile)); setFileName(selectedFile.name); toast.success(`${selectedFile.name} added to this evaluation.`); }} /><button onClick={() => inputRef.current?.click()} className="group flex w-full flex-col items-center justify-center rounded-xl border border-dashed border-[#536264] bg-[#1b2644] px-5 py-8 transition hover:border-[#63e6e9]/60 hover:bg-[#22302c]"><div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-[#63e6e9]/10 text-[#63e6e9] transition group-hover:scale-105"><UploadCloud size={20} /></div><p className="text-[12px] font-semibold text-[#dce7dd]">Drop an audio file here</p><p className="mt-1 text-[10px] text-[#758184]">or click to browse from your device</p></button><div className="my-5 flex items-center gap-3 text-[9px] uppercase tracking-[0.15em] text-[#667276]"><span className="h-px flex-1 bg-white/[0.07]" />or use a sample<span className="h-px flex-1 bg-white/[0.07]" /></div><div className="grid grid-cols-2 gap-2"><button onClick={handleRecordClick} className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-[10px] font-semibold transition ${recording ? "recording-pulse border-[#fb7185]/40 bg-[#fb7185]/10 text-[#ffc1c5]" : "border-white/[0.1] text-[#c2cdc4] hover:border-white/[0.2]"}`}>{recording ? <CircleStop size={14} /> : <Mic size={14} />}{recording ? `Stop · 00:${String(recordingSeconds).padStart(2, "0")}` : "Record audio"}</button><button onClick={() => setShowDemos(!showDemos)} className="flex items-center justify-center gap-2 rounded-lg border border-white/[0.1] px-3 py-2.5 text-[10px] font-semibold text-[#c2cdc4] transition hover:border-white/[0.2]"><Library size={14} />Demo samples<ChevronDown size={12} className={`transition ${showDemos ? "rotate-180" : ""}`} /></button></div>{showDemos && <div className="mt-3 space-y-2 rounded-xl border border-white/[0.07] bg-[#1b2644] p-2">{demoSamples.map((sample) => <button key={sample.name} onClick={() => { setFileName(`${sample.accent.toLowerCase().replace(/ /g, "-")}-demo.wav`); setShowDemos(false); toast.success(`${sample.accent} demo loaded.`); }} className="flex w-full items-center gap-3 rounded-lg px-2.5 py-2 text-left transition hover:bg-white/[0.05]"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#a78bfa]/10 text-[#a78bfa]"><Play size={11} fill="currentColor" /></span><span className="min-w-0 flex-1"><span className="block truncate text-[10px] font-semibold text-[#dce6de]">{sample.name}</span><span className="text-[9px] text-[#748083]">{sample.accent} · {sample.duration}</span></span><ArrowRight size={12} className="text-[#657276]" /></button>)}</div>}{fileName && <div className="mt-5"><AudioPlayer fileName={fileName} src={audioUrl || undefined} onPlay={() => undefined} />{transcript && <div className="mt-3 rounded-xl border border-[#67e8f9]/15 bg-[#67e8f9]/[0.04] p-3"><div className="mb-1 flex items-center gap-2 text-[9px] font-bold uppercase tracking-[0.14em] text-[#67e8f9]"><Activity size={11} />Live transcript</div><p className="text-[11px] leading-5 text-[#c5d6d1]">{transcript}</p></div>}{recordingError && <p className="mt-2 text-[10px] text-[#ffc1c5]">{recordingError}</p>}</div>}</section>
+      <section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5 sm:p-6"><div className="mb-6 flex items-start justify-between"><div><h2 className="text-[15px] font-semibold text-[#f4f7ff]">Select accent labels</h2><p className="mt-1 text-[11px] text-[#7b878a]">Choose the accent group this sample belongs to.</p></div><button onClick={() => toast.info("Accent labels power the per-group WER and CER comparison.")} className="text-[#748083] hover:text-[#dce5de]"><Info size={16} /></button></div><label className="mb-2 block text-[10px] font-bold uppercase tracking-[0.14em] text-[#748083]">Spoken language</label><div className="relative mb-4"><select value={language} onChange={(event) => setLanguage(event.target.value)} className="w-full appearance-none rounded-lg border border-white/[0.09] bg-[#1b2644] px-3 py-2.5 text-[11px] text-[#dce6de] outline-none focus:border-[#63e6e9]/50">{languages.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select><ChevronDown size={14} className="pointer-events-none absolute right-3 top-3 text-[#718083]" /></div><div className="grid gap-2 sm:grid-cols-2">{accents.map((accent) => <button key={accent.id} onClick={() => setSelectedAccent(accent.id)} className={`relative rounded-xl border p-3 text-left transition ${selectedAccent === accent.id ? "border-[#63e6e9]/50 bg-[#63e6e9]/[0.07]" : "border-white/[0.07] bg-[#1b2644] hover:border-white/[0.16]"}`}><div className="flex items-start justify-between gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg" style={{ color: accent.color, backgroundColor: `${accent.color}18` }}><Users size={14} /></span>{selectedAccent === accent.id && <span className="flex h-4 w-4 items-center justify-center rounded-full bg-[#63e6e9] text-[#07171e]"><Check size={10} strokeWidth={3} /></span>}</div><p className="mt-3 text-[11px] font-semibold text-[#dce6de]">{accent.name}</p><p className="mt-1 text-[9px] text-[#718084]">{accent.region}</p><p className="mt-3 font-mono text-[9px] text-[#85918f]">{accent.samples}</p></button>)}</div><div className="mt-5 rounded-xl border border-[#ff9b9b]/15 bg-[#ff9b9b]/[0.04] p-3"><div className="flex items-center gap-2"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeAccent.color }} /><span className="text-[10px] font-semibold text-[#d7dfd6]">Selected: {activeAccent.name}</span></div><p className="mt-1.5 text-[10px] leading-4 text-[#85918b]">This label will be used for per-accent WER and CER reporting.</p></div><button onClick={() => runAnalysis({ transcript, accent: activeAccent.name, language })} disabled={analysisStatus === "running"} className="mt-5 flex w-full items-center justify-center gap-2 rounded-lg bg-[#63e6e9] px-4 py-3 text-[11px] font-bold text-[#07171e] transition hover:bg-[#8ff7f2] disabled:cursor-not-allowed disabled:opacity-40">{analysisStatus === "running" ? <><RotateCcw size={14} className="animate-spin" />Running baseline & fine-tuned models…</> : analysisStatus === "complete" ? <><CheckCircle2 size={14} />Analysis complete — view comparison</> : <><Zap size={14} />Run bias evaluation</>}</button></section>
     </div>
   </>;
 }
@@ -276,6 +410,10 @@ function CompareView({ selectedAccent, goTo }: { selectedAccent: string; goTo: (
   </>;
 }
 
+function AdminView({ evaluations }: { evaluations: EvaluationRecord[] }) {
+  return <><div className="mb-7 flex flex-col justify-between gap-5 sm:flex-row sm:items-end"><div><SectionEyebrow color="lavender">Admin console</SectionEyebrow><h1 className="text-[29px] font-semibold tracking-[-0.05em] text-[#f4f7ff]">All evaluation data</h1><p className="mt-2 text-[12px] text-[#8294b6]">Monitor client submissions, transcription status, and model improvements.</p></div><span className="flex items-center gap-2 rounded-full border border-[#63e6e9]/20 bg-[#63e6e9]/[0.06] px-3 py-1.5 text-[10px] font-semibold text-[#9ee7e9]"><ShieldCheck size={13} />Admin access</span></div><div className="mb-5 grid gap-3 sm:grid-cols-3"><Metric label="Registered evaluations" value={String(evaluations.length)} detail="stored in browser" trend="Live" icon={ClipboardCheck} /><Metric label="Client submissions" value={String(new Set(evaluations.map((item) => item.ownerEmail)).size)} detail="unique clients" trend="Tracked" icon={Users} accent="lavender" /><Metric label="Completed runs" value={String(evaluations.filter((item) => item.status === "complete").length)} detail="with results" trend="Ready" icon={CheckCircle2} accent="orange" /></div><section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5 sm:p-6"><div className="mb-5 flex items-center justify-between"><div><SectionEyebrow>Client activity</SectionEyebrow><h2 className="text-[17px] font-semibold text-[#f4f7ff]">Evaluation history</h2></div><span className="text-[10px] text-[#7789a9]">{evaluations.length} records</span></div>{evaluations.length === 0 ? <div className="rounded-xl border border-dashed border-white/[0.12] px-6 py-12 text-center"><ClipboardCheck className="mx-auto mb-3 text-[#63e6e9]" size={24} /><p className="text-[12px] font-semibold text-[#dce7f4]">No client evaluations yet</p><p className="mt-1 text-[10px] text-[#7789a9]">Completed client runs will appear here automatically.</p></div> : <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left"><thead><tr className="border-b border-white/[0.06] text-[9px] uppercase tracking-[0.14em] text-[#6c7b9d]"><th className="pb-3 font-semibold">Client</th><th className="pb-3 font-semibold">Audio sample</th><th className="pb-3 font-semibold">Accent / language</th><th className="pb-3 font-semibold">Transcript</th><th className="pb-3 font-semibold">Status</th><th className="pb-3 text-right">WER</th></tr></thead><tbody>{evaluations.map((item) => <tr key={item.id} className="border-b border-white/[0.04] text-[11px] text-[#b3bfd3]"><td className="py-4"><p className="font-semibold text-[#e1e9f7]">{item.ownerName}</p><p className="mt-1 text-[9px] text-[#7182a1]">{item.ownerEmail}</p></td><td className="py-4 font-mono text-[#c4d0e3]">{item.fileName}</td><td className="py-4"><p>{item.accent}</p><p className="mt-1 text-[9px] text-[#7182a1]">{item.language}</p></td><td className="max-w-[280px] py-4"><p className="truncate text-[#aab9d1]">{item.transcript || "No live transcript captured"}</p></td><td className="py-4"><span className={`rounded-full px-2 py-1 text-[9px] ${item.status === "complete" ? "bg-[#63e6e9]/10 text-[#9ee7e9]" : "bg-[#fb7185]/10 text-[#ffc1c5]"}`}>{item.status}</span></td><td className="py-4 text-right font-semibold text-[#63e6e9]">{item.baselineWer} → {item.tunedWer}</td></tr>)}</tbody></table></div>}</section></>;
+}
+
 function ResultsView() {
   const [downloaded, setDownloaded] = useState(false);
   return <>
@@ -287,10 +425,13 @@ function ResultsView() {
 }
 
 export default function Index() {
+  const [session, setSession] = useState<Session | null>(() => readSession());
+  const [evaluations, setEvaluations] = useState<EvaluationRecord[]>(() => readEvaluations());
   const [activeView, setActiveView] = useState<View>("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [selectedAccent, setSelectedAccent] = useState("scot");
   const [fileName, setFileName] = useState("");
+  const [transcript, setTranscript] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("idle");
 
   const goTo = (view: View) => {
@@ -299,7 +440,7 @@ export default function Index() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const runAnalysis = () => {
+  const runAnalysis = (details: { transcript: string; accent: string; language: string }) => {
     if (!fileName) {
       toast.error("Add or record an audio sample before running an evaluation.");
       return;
@@ -307,6 +448,10 @@ export default function Index() {
     setAnalysisStatus("running");
     toast.loading("Running both ASR models…", { id: "evaluation" });
     window.setTimeout(() => {
+      const record: EvaluationRecord = { id: createId(), ownerName: session?.name || "Client", ownerEmail: session?.email || "unknown", fileName, accent: details.accent, language: details.language === "auto" ? navigator.language : details.language, transcript: details.transcript, status: "complete", createdAt: new Date().toISOString(), baselineWer: "11.4%", tunedWer: "9.3%" };
+      const nextEvaluations = [record, ...evaluations];
+      setEvaluations(nextEvaluations);
+      window.localStorage.setItem(EVALUATIONS_KEY, JSON.stringify(nextEvaluations));
       setAnalysisStatus("complete");
       toast.success("Evaluation complete. Comparison is ready.", { id: "evaluation" });
       setActiveView("compare");
@@ -318,8 +463,17 @@ export default function Index() {
     { id: "analyze" as View, label: "Audio Input", icon: Mic },
     { id: "compare" as View, label: "Transcription Comparison", icon: GitCompareArrows },
     { id: "results" as View, label: "Results & Analytics", icon: BarChart3 },
+    ...(session?.role === "admin" ? [{ id: "admin" as View, label: "Admin data", icon: ShieldCheck }] : []),
   ];
   const currentLabel = navItems.find((item) => item.id === activeView)?.label ?? "Home / Dashboard";
 
-  return <div className="min-h-screen bg-[#0b1020] text-[#f4f7ff]"><div className="flex min-h-screen"><aside className={`fixed inset-y-0 left-0 z-40 flex w-[252px] shrink-0 flex-col border-r border-white/[0.07] bg-[#10172d] px-4 py-5 transition-transform duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}><div className="flex items-center gap-3 px-3"><LogoMark /><div><p className="text-[14px] font-bold tracking-[-0.03em] text-[#f4f7ff]">accent<span className="text-[#63e6e9]">/</span>lens</p><p className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-[#6e7b7d]">ASR bias lab</p></div><button onClick={() => setSidebarOpen(false)} className="ml-auto rounded-lg p-1 text-[#748084] hover:bg-white/[0.06] lg:hidden"><X size={16} /></button></div><div className="mt-10"><p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#687578]">Workspace</p><nav className="space-y-1">{navItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => goTo(id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold transition ${activeView === id ? "bg-[#63e6e9]/10 text-[#63e6e9]" : "text-[#8b9899] hover:bg-white/[0.045] hover:text-[#dce6de]"}`}><Icon size={16} strokeWidth={1.8} />{label}{activeView === id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#63e6e9]" />}</button>)}</nav></div><div className="mt-9"><p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#687578]">Evaluation tools</p><button onClick={() => goTo("analyze")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold text-[#8b9899] transition hover:bg-white/[0.045] hover:text-[#dce6de]"><ClipboardCheck size={16} strokeWidth={1.8} />Run batch evaluation</button><button onClick={() => goTo("results")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold text-[#8b9899] transition hover:bg-white/[0.045] hover:text-[#dce6de]"><FileText size={16} strokeWidth={1.8} />Evaluation reports</button></div><div className="mt-auto rounded-xl border border-[#63e6e9]/15 bg-[#63e6e9]/[0.045] p-3.5"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#a5cc7c]">Model pipeline</span><span className="h-1.5 w-1.5 rounded-full bg-[#63e6e9] shadow-[0_0_7px_#63e6e9]" /></div><p className="text-[11px] font-semibold text-[#dbe9d7]">Balanced-v2 adapter</p><p className="mt-1 text-[10px] text-[#788786]">Whisper small · ready</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#27352d]"><div className="h-full w-[84%] rounded-full bg-[#63e6e9]" /></div><p className="mt-2 text-[9px] text-[#859587]">84% evaluation coverage</p></div><div className="mt-5 flex items-center gap-3 border-t border-white/[0.07] px-2 pt-4"><div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#6e5f85] text-[10px] font-bold">PG</div><div className="min-w-0"><p className="truncate text-[11px] font-semibold text-[#d6e0d6]">Prince Gohel</p><p className="text-[10px] text-[#707c7f]">Researcher</p></div><Settings2 size={14} className="ml-auto text-[#6f7b7e]" /></div></aside>{sidebarOpen && <button aria-label="Close navigation" className="fixed inset-0 z-30 bg-[#090d0e]/70 lg:hidden" onClick={() => setSidebarOpen(false)} />}<main className="min-w-0 flex-1"><header className="flex h-[72px] items-center justify-between border-b border-white/[0.07] px-5 sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-[#94a1a1] hover:bg-white/[0.06] lg:hidden"><Menu size={19} /></button><div className="hidden h-7 w-px bg-white/[0.08] sm:block" /><div><p className="text-[11px] text-[#6f7b7e]">AccentLens / <span className="text-[#bdc9c0]">{currentLabel}</span></p><p className="mt-0.5 text-[10px] text-[#596669]">ASR accent bias detection & mitigation</p></div></div><div className="flex items-center gap-2 sm:gap-3"><span className="hidden items-center gap-2 rounded-full border border-white/[0.08] px-3 py-1.5 text-[10px] text-[#81908d] sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-[#63e6e9]" />API engine online</span><button onClick={() => goTo("analyze")} className="flex items-center gap-2 rounded-lg bg-[#63e6e9] px-3.5 py-2.5 text-[11px] font-bold text-[#07171e] shadow-[0_0_18px_rgba(157,230,106,0.12)] transition hover:bg-[#8ff7f2]"><Plus size={15} strokeWidth={2.5} />New evaluation</button></div></header><div key={activeView} className="page-enter mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9">{activeView === "home" && <HomeView goTo={goTo} />}{activeView === "analyze" && <AnalyzeView selectedAccent={selectedAccent} setSelectedAccent={setSelectedAccent} fileName={fileName} setFileName={setFileName} runAnalysis={runAnalysis} analysisStatus={analysisStatus} />}{activeView === "compare" && <CompareView selectedAccent={selectedAccent} goTo={goTo} />}{activeView === "results" && <ResultsView />}<footer className="flex flex-col justify-between gap-2 py-7 text-[10px] text-[#5f6d70] sm:flex-row"><span>AccentLens · ASR Accent Bias Detection & Mitigation</span><span className="flex items-center gap-4"><button onClick={() => toast.info("Documentation is included in the evaluation workflow.")} className="hover:text-[#a7b6af]">Documentation</button><button onClick={() => toast.success("All browser-side services are operational.")} className="hover:text-[#a7b6af]">System status <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#63e6e9]" /></button></span></footer></div></main></div></div>;
+  const logout = () => {
+    window.localStorage.removeItem(SESSION_KEY);
+    setSession(null);
+    toast.success("You have been signed out.");
+  };
+
+  if (!session) return <AuthScreen onAuthenticated={setSession} />;
+
+  return <div className="min-h-screen bg-[#0b1020] text-[#f4f7ff]"><div className="flex min-h-screen"><aside className={`fixed inset-y-0 left-0 z-40 flex w-[252px] shrink-0 flex-col border-r border-white/[0.07] bg-[#10172d] px-4 py-5 transition-transform duration-200 lg:static lg:translate-x-0 ${sidebarOpen ? "translate-x-0" : "-translate-x-full"}`}><div className="flex items-center gap-3 px-3"><LogoMark /><div><p className="text-[14px] font-bold tracking-[-0.03em] text-[#f4f7ff]">accent<span className="text-[#63e6e9]">/</span>lens</p><p className="mt-0.5 text-[9px] uppercase tracking-[0.16em] text-[#6e7b7d]">ASR bias lab</p></div><button onClick={() => setSidebarOpen(false)} className="ml-auto rounded-lg p-1 text-[#748084] hover:bg-white/[0.06] lg:hidden"><X size={16} /></button></div><div className="mt-10"><p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#687578]">Workspace</p><nav className="space-y-1">{navItems.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => goTo(id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold transition ${activeView === id ? "bg-[#63e6e9]/10 text-[#63e6e9]" : "text-[#8b9899] hover:bg-white/[0.045] hover:text-[#dce6de]"}`}><Icon size={16} strokeWidth={1.8} />{label}{activeView === id && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#63e6e9]" />}</button>)}</nav></div><div className="mt-9"><p className="mb-3 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#687578]">Evaluation tools</p><button onClick={() => goTo("analyze")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold text-[#8b9899] transition hover:bg-white/[0.045] hover:text-[#dce6de]"><ClipboardCheck size={16} strokeWidth={1.8} />Run batch evaluation</button><button onClick={() => goTo("results")} className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-[11px] font-semibold text-[#8b9899] transition hover:bg-white/[0.045] hover:text-[#dce6de]"><FileText size={16} strokeWidth={1.8} />Evaluation reports</button></div><div className="mt-auto rounded-xl border border-[#63e6e9]/15 bg-[#63e6e9]/[0.045] p-3.5"><div className="mb-2 flex items-center justify-between"><span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#a5cc7c]">Model pipeline</span><span className="h-1.5 w-1.5 rounded-full bg-[#63e6e9] shadow-[0_0_7px_#63e6e9]" /></div><p className="text-[11px] font-semibold text-[#dbe9d7]">Balanced-v2 adapter</p><p className="mt-1 text-[10px] text-[#788786]">Whisper small · ready</p><div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#27352d]"><div className="h-full w-[84%] rounded-full bg-[#63e6e9]" /></div><p className="mt-2 text-[9px] text-[#859587]">84% evaluation coverage</p></div><div className="mt-5 flex items-center gap-3 border-t border-white/[0.07] px-2 pt-4"><div className="flex h-7 w-7 items-center justify-center rounded-full bg-[#6e5f85] text-[10px] font-bold">PG</div><div className="min-w-0"><p className="truncate text-[11px] font-semibold text-[#d6e0d6]">{session.name}</p><p className="text-[10px] text-[#707c7f]">{session.role === "admin" ? "Administrator" : "Client researcher"}</p></div><button onClick={logout} aria-label="Sign out" className="ml-auto rounded-md p-1 text-[#6f7b7e] hover:bg-white/[0.06] hover:text-[#f4f7ff]"><LogOut size={14} /></button></div></aside>{sidebarOpen && <button aria-label="Close navigation" className="fixed inset-0 z-30 bg-[#090d0e]/70 lg:hidden" onClick={() => setSidebarOpen(false)} />}<main className="min-w-0 flex-1"><header className="flex h-[72px] items-center justify-between border-b border-white/[0.07] px-5 sm:px-8 lg:px-10"><div className="flex items-center gap-3"><button onClick={() => setSidebarOpen(true)} className="rounded-lg p-2 text-[#94a1a1] hover:bg-white/[0.06] lg:hidden"><Menu size={19} /></button><div className="hidden h-7 w-px bg-white/[0.08] sm:block" /><div><p className="text-[11px] text-[#6f7b7e]">AccentLens / <span className="text-[#bdc9c0]">{currentLabel}</span></p><p className="mt-0.5 text-[10px] text-[#596669]">ASR accent bias detection & mitigation</p></div></div><div className="flex items-center gap-2 sm:gap-3"><span className="hidden items-center gap-2 rounded-full border border-white/[0.08] px-3 py-1.5 text-[10px] text-[#81908d] sm:flex"><span className="h-1.5 w-1.5 rounded-full bg-[#63e6e9]" />API engine online</span><button onClick={() => goTo("analyze")} className="flex items-center gap-2 rounded-lg bg-[#63e6e9] px-3.5 py-2.5 text-[11px] font-bold text-[#07171e] shadow-[0_0_18px_rgba(157,230,106,0.12)] transition hover:bg-[#8ff7f2]"><Plus size={15} strokeWidth={2.5} />New evaluation</button></div></header><div key={activeView} className="page-enter mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10 lg:py-9">{activeView === "home" && <HomeView goTo={goTo} />}{activeView === "analyze" && <AnalyzeView selectedAccent={selectedAccent} setSelectedAccent={setSelectedAccent} fileName={fileName} setFileName={setFileName} runAnalysis={runAnalysis} analysisStatus={analysisStatus} transcript={transcript} setTranscript={setTranscript} />}{activeView === "compare" && <CompareView selectedAccent={selectedAccent} goTo={goTo} />}{activeView === "results" && <ResultsView />}{activeView === "admin" && session.role === "admin" && <AdminView evaluations={evaluations} />}<footer className="flex flex-col justify-between gap-2 py-7 text-[10px] text-[#5f6d70] sm:flex-row"><span>AccentLens · ASR Accent Bias Detection & Mitigation</span><span className="flex items-center gap-4"><button onClick={() => toast.info("Documentation is included in the evaluation workflow.")} className="hover:text-[#a7b6af]">Documentation</button><button onClick={() => toast.success("All browser-side services are operational.")} className="hover:text-[#a7b6af]">System status <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-[#63e6e9]" /></button></span></footer></div></main></div></div>;
 }
