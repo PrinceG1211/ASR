@@ -20,19 +20,6 @@ const menu = [
   { id: "reports" as AdminMenuId, label: "Reports", icon: ClipboardCheck, target: "admin-reports" },
 ];
 
-const demoUsers = [
-  { name: "user123", email: "user123@example.com", status: "Active", samples: 32 },
-  { name: "user124", email: "user124@example.com", status: "Active", samples: 24 },
-  { name: "user125", email: "user125@example.com", status: "Review", samples: 18 },
-];
-
-const audioFiles = [
-  { name: "audio_001.wav", accent: "Indian English", duration: "00:04" },
-  { name: "audio_002.wav", accent: "British English", duration: "00:05" },
-  { name: "audio_003.wav", accent: "American English", duration: "00:06" },
-  { name: "audio_004.wav", accent: "Nigerian English", duration: "00:08" },
-];
-
 function BrandMark() {
   return <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#493879] to-[#8b5bc4] text-white shadow-sm"><span className="text-[13px] font-black">∿</span></div>;
 }
@@ -54,18 +41,18 @@ export default function AdminDashboard({ evaluations, goTo, logout }: AdminDashb
   const [mobileOpen, setMobileOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [liveUpdates, setLiveUpdates] = useState(true);
-  const rows = evaluations.length ? evaluations.slice(0, 4) : [
-    { id: "a", ownerName: "user123", ownerEmail: "user123@example.com", accent: "Indian English", baselineWer: "14.20%", tunedWer: "10.80%", status: "complete" as const, fileName: "weather_sample.wav", language: "en-IN", transcript: "The weather is lovely today", createdAt: "Today" },
-    { id: "b", ownerName: "user124", ownerEmail: "user124@example.com", accent: "British English", baselineWer: "8.10%", tunedWer: "6.90%", status: "complete" as const, fileName: "meeting_sample.wav", language: "en-GB", transcript: "Could you send the report over?", createdAt: "Yesterday" },
-    { id: "c", ownerName: "user125", ownerEmail: "user125@example.com", accent: "American English", baselineWer: "7.90%", tunedWer: "6.40%", status: "complete" as const, fileName: "report_sample.wav", language: "en-US", transcript: "We are meeting after lunch", createdAt: "Yesterday" },
-  ];
+  const rows = evaluations.slice(0, 4);
+  const measuredWers = evaluations.map((item) => Number.parseFloat(item.baselineWer)).filter((value) => Number.isFinite(value));
+  const averageWer = measuredWers.length ? `${(measuredWers.reduce((sum, value) => sum + value, 0) / measuredWers.length).toFixed(2)}%` : "—";
   const metrics = [
-    { label: "Total users", value: String(new Set(evaluations.map((item) => item.ownerEmail)).size + 12), trend: "+13%", icon: Users },
-    { label: "Total submissions", value: String(evaluations.length + 156), trend: "+18%", icon: FileAudio },
-    { label: "Avg WER", value: "13.24%", trend: "−2.1%", icon: Gauge },
-    { label: "Avg processing time", value: "2.45 sec", trend: "−3%", icon: Clock3 },
+    { label: "Total users", value: String(new Set(evaluations.map((item) => item.ownerEmail)).size), trend: evaluations.length ? "Measured" : "No results", icon: Users },
+    { label: "Total submissions", value: String(evaluations.length), trend: evaluations.length ? "Stored" : "No results", icon: FileAudio },
+    { label: "Avg WER", value: averageWer, trend: measuredWers.length ? "Measured" : "No results", icon: Gauge },
+    { label: "Avg processing time", value: "—", trend: "Not measured", icon: Clock3 },
   ];
-  const errors = ["the weather is quiet beautiful today", "available", "comfortable", "tomorrow", "available"];
+  const errors: string[] = [];
+  const audioFiles = evaluations.map((item) => ({ name: item.fileName, accent: item.accent, duration: "Reference required" }));
+  const userRows = Array.from(new Map(evaluations.map((item) => [item.ownerEmail, { name: item.ownerName, email: item.ownerEmail, status: "Recorded", samples: evaluations.filter((entry) => entry.ownerEmail === item.ownerEmail).length }])).values());
   const currentLabel = menu.find((item) => item.id === activeMenu)?.label ?? "Overview";
 
   const selectMenu = (item: typeof menu[number]) => {
@@ -93,7 +80,7 @@ export default function AdminDashboard({ evaluations, goTo, logout }: AdminDashb
 
         <div id="admin-analytics" className="mt-3 grid scroll-mt-5 gap-3 lg:grid-cols-2"><section className="rounded-lg border border-white/[0.06] bg-[#181b23] p-4"><div className="mb-4 flex items-center justify-between"><h2 className="text-[11px] font-bold">WER over time</h2><span className="text-[8px] text-[#697184]">Last 7 days</span></div><div className="flex h-28 items-end justify-around gap-2 border-b border-l border-white/[0.08] px-3 pb-2">{[42, 58, 46, 31, 34, 48, 38].map((height, index) => <div key={index} className="group flex h-full flex-1 flex-col items-center justify-end"><span className="mb-1 hidden text-[8px] text-[#a78bfa] group-hover:block">{(8 + index * 0.7).toFixed(1)}%</span><div className="w-1.5 rounded-t-full bg-gradient-to-t from-[#4c82d5] to-[#a78bfa]" style={{ height: `${height}%` }} /></div>)}</div></section><section className="rounded-lg border border-white/[0.06] bg-[#181b23] p-4"><div className="mb-4 flex items-center justify-between"><h2 className="text-[11px] font-bold">Top errors</h2><span className="text-[8px] text-[#697184]">Count</span></div><div className="space-y-3">{errors.map((word, index) => <div key={`${word}-${index}`} className="flex items-center justify-between gap-3 text-[9px] text-[#aeb8c9]"><span className="truncate">{word}</span><span className="font-semibold text-[#e2e7f0]">{23 - index * 3}</span></div>)}</div></section></div>
 
-        <section id="admin-users" className="mt-3 scroll-mt-5 rounded-lg border border-white/[0.06] bg-[#181b23] p-4"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-[11px] font-bold">Users</h2><p className="mt-1 text-[9px] text-[#717b8f]">Client accounts and their evaluation activity</p></div><span className="rounded bg-[#8b5bc4]/15 px-2 py-1 text-[8px] font-semibold text-[#c4b5fd]">{metrics[0].value} total</span></div><div className="grid gap-2 md:grid-cols-3">{demoUsers.map((user) => <div key={user.email} className="rounded-md border border-white/[0.06] bg-[#1d2029] p-3"><div className="flex items-center justify-between"><span className="text-[10px] font-semibold text-[#d1d8e5]">{user.name}</span><span className={`text-[8px] ${user.status === "Active" ? "text-[#56d2aa]" : "text-[#f1c27d]"}`}>{user.status}</span></div><p className="mt-1 truncate text-[8px] text-[#727d90]">{user.email}</p><p className="mt-3 text-[9px] text-[#aeb8c9]">{user.samples} samples evaluated</p></div>)}</div></section>
+        <section id="admin-users" className="mt-3 scroll-mt-5 rounded-lg border border-white/[0.06] bg-[#181b23] p-4"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-[11px] font-bold">Users</h2><p className="mt-1 text-[9px] text-[#717b8f]">Client accounts and their evaluation activity</p></div><span className="rounded bg-[#8b5bc4]/15 px-2 py-1 text-[8px] font-semibold text-[#c4b5fd]">{metrics[0].value} total</span></div><div className="grid gap-2 md:grid-cols-3">{userRows.map((user) => <div key={user.email} className="rounded-md border border-white/[0.06] bg-[#1d2029] p-3"><div className="flex items-center justify-between"><span className="text-[10px] font-semibold text-[#d1d8e5]">{user.name}</span><span className={`text-[8px] ${user.status === "Active" ? "text-[#56d2aa]" : "text-[#f1c27d]"}`}>{user.status}</span></div><p className="mt-1 truncate text-[8px] text-[#727d90]">{user.email}</p><p className="mt-3 text-[9px] text-[#aeb8c9]">{user.samples} samples evaluated</p></div>)}</div></section>
 
         <section className="mt-3 rounded-lg border border-white/[0.06] bg-[#181b23] p-4"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-[11px] font-bold">Audio submissions</h2><p className="mt-1 text-[9px] text-[#717b8f]">Review the latest client audio files</p></div><button onClick={() => document.getElementById("admin-submissions")?.scrollIntoView({ behavior: "smooth" })} aria-label="Jump to submissions" className="text-[#a78bfa] transition hover:text-[#d0c3ff]"><ArrowUpRight size={14} /></button></div><div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">{audioFiles.map((file) => <div key={file.name} className="flex items-center gap-2 rounded-md border border-white/[0.06] bg-[#1d2029] p-2"><button onClick={() => toast.info(`${file.name} is ready for playback in the audio workspace.`)} aria-label={`Play ${file.name}`} className="flex h-6 w-6 items-center justify-center rounded-full bg-[#a78bfa]/10 text-[#c4b5fd] transition hover:bg-[#a78bfa]/20"><Play size={10} fill="currentColor" /></button><span className="min-w-0 flex-1"><span className="block truncate text-[9px] font-semibold text-[#cbd4e2]">{file.name}</span><span className="text-[8px] text-[#6f7a8f]">{file.accent} · {file.duration}</span></span><button onClick={() => downloadReport(evaluations)} aria-label={`Download report for ${file.name}`} className="rounded p-1 text-[#747e91] transition hover:bg-white/[0.06] hover:text-[#d5dcef]"><Download size={11} /></button></div>)}</div></section>
 

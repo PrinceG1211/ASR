@@ -1,0 +1,27 @@
+import type { ExperimentSummary } from "@shared/experiment";
+import type { View } from "@/pages/Index";
+
+type Props = {
+  experiment: ExperimentSummary | null;
+  goTo: (view: View) => void;
+  downloadTextFile: (fileName: string, content: string) => void;
+};
+
+function percent(value: number | undefined) {
+  return value == null ? "—" : `${(value * 100).toFixed(2)}%`;
+}
+
+function EmptyState({ title, description, goTo }: { title: string; description: string; goTo: (view: View) => void }) {
+  return <section className="page-enter rounded-2xl border border-white/[0.07] bg-[#151d37] p-6"><p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#a78bfa]">Experimental state</p><h1 className="mt-2 text-[28px] font-semibold tracking-[-0.05em] text-[#f0f5ed]">{title}</h1><p className="mt-3 max-w-xl text-[12px] leading-6 text-[#829092]">{description}</p><button onClick={() => goTo("results")} className="mt-5 rounded-lg bg-[#63e6e9] px-4 py-2 text-[10px] font-bold text-[#07171e]">View experiment status</button></section>;
+}
+
+export function ExperimentComparisonView({ experiment, goTo }: Props) {
+  if (!experiment?.baseline) return <EmptyState title="No experimental results available." description="Run the Common Voice dataset preparation and original Whisper baseline before opening a sample comparison." goTo={goTo} />;
+  return <div className="page-enter"><div className="mb-7 flex items-end justify-between gap-4"><div><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#c4b5fd]">Transcription comparison</p><h1 className="text-[29px] font-semibold tracking-[-0.05em] text-[#f0f5ed]">Whisper baseline results</h1><p className="mt-2 text-[12px] text-[#829092]">Held-out test metrics from experiment {experiment.id}.</p></div><button onClick={() => goTo("analyze")} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[10px] font-semibold text-[#9aa7a4]">New sample</button></div><section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5"><div className="overflow-x-auto"><table className="w-full min-w-[560px] text-left text-[10px]"><thead className="border-b border-white/[0.07] text-[#687578]"><tr><th className="pb-3">Accent</th><th className="pb-3">Samples</th><th className="pb-3">Speakers</th><th className="pb-3">Baseline WER</th><th className="pb-3">Baseline CER</th></tr></thead><tbody>{experiment.baseline.accents.map((row) => <tr key={row.accent} className="border-b border-white/[0.04] text-[#c7d0ca]"><td className="py-3">{row.label}</td><td className="py-3">{row.samples}</td><td className="py-3">{row.speakers}</td><td className="py-3">{percent(row.baselineWer)}</td><td className="py-3">{percent(row.baselineCer)}</td></tr>)}</tbody></table></div></section></div>;
+}
+
+export function ExperimentResultsView({ experiment, goTo, downloadTextFile }: Props) {
+  if (!experiment?.baseline) return <EmptyState title="No experimental results available." description="Prepare Mozilla Common Voice and run the original Whisper baseline to populate this page. No invented WER or CER values are shown." goTo={goTo} />;
+  const metrics = [{ label: "Mean WER", value: percent(experiment.baseline.meanWer) }, { label: "Mean CER", value: percent(experiment.baseline.meanCer) }, { label: "Best WER", value: percent(experiment.baseline.bestWer) }, { label: "Accent gap", value: percent(experiment.baseline.gap) }];
+  return <div className="page-enter"><div className="mb-7"><p className="mb-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#ff9b9b]">Results & analytics</p><h1 className="text-[29px] font-semibold tracking-[-0.05em] text-[#f0f5ed]">Accent-wise baseline performance</h1><p className="mt-2 text-[12px] text-[#829092]">Actual held-out test results from experiment {experiment.id}.</p></div><div className="mb-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{metrics.map((metric) => <div key={metric.label} className="rounded-xl border border-white/[0.07] bg-[#151d37] p-4"><p className="text-[9px] uppercase tracking-[0.14em] text-[#687578]">{metric.label}</p><p className="mt-2 text-[22px] font-semibold text-[#f4f7ff]">{metric.value}</p></div>)}</div><section className="rounded-2xl border border-white/[0.07] bg-[#151d37] p-5"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-[15px] font-semibold text-[#f4f7ff]">Baseline Whisper by accent</h2><p className="mt-1 text-[10px] text-[#758185]">Only groups present in the Common Voice manifest are reported.</p></div><button onClick={() => downloadTextFile(`experiment-${experiment.id}.json`, JSON.stringify(experiment, null, 2))} className="rounded-lg border border-white/[0.1] px-3 py-2 text-[10px] font-semibold text-[#63e6e9]">Export results</button></div><div className="overflow-x-auto"><table className="w-full min-w-[620px] text-left text-[10px]"><thead className="border-b border-white/[0.07] text-[#687578]"><tr><th className="pb-3">Accent</th><th className="pb-3">Samples</th><th className="pb-3">Speakers</th><th className="pb-3">Baseline WER</th><th className="pb-3">Baseline CER</th></tr></thead><tbody>{experiment.baseline.accents.map((row) => <tr key={row.accent} className="border-b border-white/[0.04] text-[#c7d0ca]"><td className="py-3">{row.label}</td><td className="py-3">{row.samples}</td><td className="py-3">{row.speakers}</td><td className="py-3">{percent(row.baselineWer)}</td><td className="py-3">{percent(row.baselineCer)}</td></tr>)}</tbody></table></div></section></div>;
+}

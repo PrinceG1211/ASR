@@ -1,4 +1,5 @@
 import { ArrowRight, ArrowUpRight, BarChart3, CheckCircle2, Download, FileAudio, FileText, Mic, Sparkles, UploadCloud } from "lucide-react";
+import type { ExperimentSummary } from "@shared/experiment";
 import type { Session, EvaluationRecord, View } from "@/pages/Index";
 
 type ClientDashboardProps = {
@@ -7,6 +8,7 @@ type ClientDashboardProps = {
   goTo: (view: View) => void;
   logout: () => void;
   downloadTextFile: (fileName: string, content: string) => void;
+  experiment: ExperimentSummary | null;
 };
 
 function UserMark({ name }: { name: string }) {
@@ -14,23 +16,17 @@ function UserMark({ name }: { name: string }) {
   return <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#396fe8] to-[#8b5cf6] text-[11px] font-bold text-white shadow-[0_8px_18px_rgba(70,91,190,0.22)]">{initials || "U"}</div>;
 }
 
-const quickStats = [
-  { label: "Average WER", value: "11.8%", detail: "Across recent samples", color: "#356ee8" },
-  { label: "Model improvement", value: "20.6%", detail: "After adaptation", color: "#8b5cf6" },
-  { label: "Samples checked", value: "15.1k", detail: "Across all accents", color: "#ef8b47" },
-];
-
-const accentBars = [
-  { label: "American", value: 8.2, color: "#396fe8" },
-  { label: "Indian", value: 14.7, color: "#ee6872" },
-  { label: "Nigerian", value: 16.1, color: "#8b5cf6" },
-  { label: "Scottish", value: 9.3, color: "#2caeaa" },
-];
-
-export default function ClientDashboard({ session, evaluations, goTo, logout, downloadTextFile }: ClientDashboardProps) {
+export default function ClientDashboard({ session, evaluations, goTo, logout, downloadTextFile, experiment }: ClientDashboardProps) {
   const latest = evaluations[0];
   const firstName = session.name.trim().split(/\s+/)[0] || "there";
-  const latestTranscript = latest?.transcript || "The weather is lovely today";
+  const latestTranscript = latest?.transcript || "No transcript available.";
+  const baseline = experiment?.baseline;
+  const quickStats = [
+    { label: "Average WER", value: baseline?.meanWer == null ? "—" : `${(baseline.meanWer * 100).toFixed(2)}%`, detail: baseline ? "Actual held-out test" : "No experimental results", color: "#356ee8" },
+    { label: "Model improvement", value: experiment?.fineTuned ? `${(((baseline?.meanWer ?? 0) - experiment.fineTuned.meanWer) * 100).toFixed(2)}pp` : "—", detail: experiment?.fineTuned ? "Baseline vs fine-tuned" : "Fine-tuning not completed", color: "#8b5cf6" },
+    { label: "Samples checked", value: baseline ? String(baseline.accents.reduce((sum, row) => sum + row.samples, 0)) : "—", detail: baseline ? "Held-out test samples" : "No experimental results", color: "#ef8b47" },
+  ];
+  const accentBars = baseline?.accents.filter((row) => row.baselineWer != null).map((row, index) => ({ label: row.label, value: (row.baselineWer ?? 0) * 100, color: ["#396fe8", "#ee6872", "#8b5cf6", "#2caeaa"][index % 4] })) ?? [];
 
   return <div className="min-h-screen bg-[#f7f9fc] text-[#17243d]">
     <header className="border-b border-[#e2e8f1] bg-white/95 px-5 py-4 shadow-[0_4px_18px_rgba(31,52,91,0.04)] backdrop-blur sm:px-8">
