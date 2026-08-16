@@ -1,0 +1,8 @@
+{
+  "id": "a831ad01-61e3-48e4-b5a0-19caa7faac54",
+  "status": "failed",
+  "stage": "baseline",
+  "createdAt": "2026-08-16T13:27:28Z",
+  "updatedAt": "2026-08-16T13:27:29Z",
+  "error": "FileNotFoundError: Manifest not found for experiment a831ad01-61e3-48e4-b5a0-19caa7faac54. Run prepare first."
+}

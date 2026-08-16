@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ExperimentStage, ExperimentSummary } from "@shared/experiment";
+import type { ExperimentStage, ExperimentSummary, RuntimeStatusResponse } from "@shared/experiment";
 import {
   Activity,
   ArrowDownRight,
@@ -508,6 +508,8 @@ export default function Index() {
   const [transcript, setTranscript] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [experiment, setExperiment] = useState<ExperimentSummary | null>(null);
+  const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
+  const [runtimeInstallRequest, setRuntimeInstallRequest] = useState(false);
   const [experimentRequest, setExperimentRequest] = useState(false);
 
   const refreshExperiment = async () => {
@@ -521,9 +523,49 @@ export default function Index() {
     }
   };
 
+  const checkRuntime = async () => {
+    try {
+      const response = await fetch("/api/experiments/runtime");
+      if (!response.ok) throw new Error("Runtime status unavailable");
+      setRuntimeStatus(await response.json() as RuntimeStatusResponse);
+    } catch {
+      setRuntimeStatus(null);
+      toast.error("ML runtime status could not be checked.");
+    }
+  };
+
   useEffect(() => {
     void refreshExperiment();
   }, []);
+
+  useEffect(() => {
+    if (session?.role === "admin") void checkRuntime();
+  }, [session?.role]);
+
+  const installRuntime = async () => {
+    if (runtimeInstallRequest) return;
+    setRuntimeInstallRequest(true);
+    try {
+      const response = await fetch("/api/experiments/runtime/install", { method: "POST" });
+      const initial = await response.json() as { status?: string; detail?: string };
+      if (!response.ok) throw new Error(initial.detail || "ML dependency installation could not start.");
+      const poll = window.setInterval(async () => {
+        const status = await fetch("/api/experiments/runtime/install").then((result) => result.json() as Promise<{ status?: string; detail?: string }>);
+        if (status.status === "running") return;
+        window.clearInterval(poll);
+        setRuntimeInstallRequest(false);
+        if (status.status === "complete") {
+          toast.success(status.detail || "ML dependencies installed.");
+          await checkRuntime();
+        } else {
+          toast.error(status.detail || "ML dependency installation failed.");
+        }
+      }, 2000);
+    } catch (error) {
+      setRuntimeInstallRequest(false);
+      toast.error(error instanceof Error ? error.message : "ML dependency installation failed.");
+    }
+  };
 
   const runExperimentStage = async (stage: ExperimentStage) => {
     if (experimentRequest) return;
@@ -576,7 +618,7 @@ export default function Index() {
   };
 
   if (!session) return <AuthScreen onAuthenticated={(nextSession) => { setSession(nextSession); setActiveView(nextSession.role === "admin" ? "admin" : "home"); }} />;
-  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} experiment={experiment} goTo={goTo} logout={logout} runStage={runExperimentStage} />;
+  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} experiment={experiment} runtimeStatus={runtimeStatus} checkRuntime={checkRuntime} installRuntime={installRuntime} runtimeInstallRequest={runtimeInstallRequest} goTo={goTo} logout={logout} runStage={runExperimentStage} />;
   if (session.role === "client" && activeView === "home") return <ClientDashboard session={session} evaluations={evaluations} goTo={goTo} logout={logout} downloadTextFile={downloadTextFile} experiment={experiment} />;
 
   return <ClientWorkspace session={session} activeView={activeView} goTo={goTo} logout={logout} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} transcript={transcript} setTranscript={setTranscript} experiment={experiment} />;

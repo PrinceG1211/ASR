@@ -78,3 +78,19 @@ export type ExperimentListResponse = {
 export type ExperimentResponse = {
   experiment: ExperimentSummary | null;
 };
+
+export type RuntimeStatus = "available" | "configuring" | "unavailable";
+
+export type RuntimeCapability = {
+  status: RuntimeStatus;
+  detail: string;
+};
+
+export type RuntimeStatusResponse = {
+  checkedAt: string;
+  runtime: RuntimeCapability;
+  whisper: RuntimeCapability;
+  dataset: RuntimeCapability;
+  evaluation: RuntimeCapability;
+  fineTuning: RuntimeCapability;
+};
