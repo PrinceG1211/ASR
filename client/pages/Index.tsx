@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ExperimentSummary } from "@shared/experiment";
+import type { ExperimentStage, ExperimentSummary } from "@shared/experiment";
 import {
   Activity,
   ArrowDownRight,
@@ -508,12 +508,43 @@ export default function Index() {
   const [transcript, setTranscript] = useState("");
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [experiment, setExperiment] = useState<ExperimentSummary | null>(null);
+  const [experimentRequest, setExperimentRequest] = useState(false);
+
+  const refreshExperiment = async () => {
+    try {
+      const response = await fetch("/api/experiments/latest");
+      if (!response.ok) throw new Error("Experiment API unavailable");
+      const payload = await response.json() as { experiment: ExperimentSummary | null };
+      setExperiment(payload.experiment);
+    } catch {
+      setExperiment(null);
+    }
+  };
 
   useEffect(() => {
-    let active = true;
-    fetch("/api/experiments/latest").then((response) => response.ok ? response.json() : Promise.reject(new Error("Experiment API unavailable"))).then((payload: { experiment: ExperimentSummary | null }) => { if (active) setExperiment(payload.experiment); }).catch(() => { if (active) setExperiment(null); });
-    return () => { active = false; };
+    void refreshExperiment();
   }, []);
+
+  const runExperimentStage = async (stage: ExperimentStage) => {
+    if (experimentRequest) return;
+    setExperimentRequest(true);
+    try {
+      const endpoint = stage === "dataset" ? "/api/experiments" : `/api/experiments/${experiment?.id}/${stage}`;
+      const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(stage === "baseline" ? { checkpoint: "openai/whisper-small" } : stage === "finetune" ? { checkpoint: "openai/whisper-small", epochs: 3, learningRate: 0.00001, batchSize: 4, seed: 42 } : {}) });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Experiment stage could not start.");
+      await refreshExperiment();
+      const poll = window.setInterval(async () => {
+        await refreshExperiment();
+        const latest = await fetch("/api/experiments/latest").then((result) => result.ok ? result.json() as Promise<{ experiment: ExperimentSummary | null }> : Promise.reject(new Error("status"))).catch(() => ({ experiment: null }));
+        if (!latest.experiment || latest.experiment.status !== "running") window.clearInterval(poll);
+      }, 2000);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Experiment stage failed to start.");
+    } finally {
+      setExperimentRequest(false);
+    }
+  };
 
   const goTo = (view: View) => {
     setActiveView(view);
@@ -545,7 +576,7 @@ export default function Index() {
   };
 
   if (!session) return <AuthScreen onAuthenticated={(nextSession) => { setSession(nextSession); setActiveView(nextSession.role === "admin" ? "admin" : "home"); }} />;
-  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} goTo={goTo} logout={logout} />;
+  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} experiment={experiment} goTo={goTo} logout={logout} runStage={runExperimentStage} />;
   if (session.role === "client" && activeView === "home") return <ClientDashboard session={session} evaluations={evaluations} goTo={goTo} logout={logout} downloadTextFile={downloadTextFile} experiment={experiment} />;
 
   return <ClientWorkspace session={session} activeView={activeView} goTo={goTo} logout={logout} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} transcript={transcript} setTranscript={setTranscript} experiment={experiment} />;
