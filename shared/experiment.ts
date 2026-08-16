@@ -94,3 +94,21 @@ export type RuntimeStatusResponse = {
   evaluation: RuntimeCapability;
   fineTuning: RuntimeCapability;
 };
+
+export type MlWorkerConfig = {
+  provider: string;
+  endpoint: string;
+  model: string;
+  hasApiKey: boolean;
+};
+
+export type MlWorkerConnection = {
+  status: "unconfigured" | "testing" | "connected" | "failed";
+  detail: string;
+  checkedAt?: string;
+};
+
+export type MlWorkerConfigResponse = {
+  config: MlWorkerConfig;
+  connection: MlWorkerConnection;
+};

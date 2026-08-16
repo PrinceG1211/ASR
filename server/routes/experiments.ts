@@ -4,22 +4,6 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import type { RequestHandler } from "express";
 
-const dependencyInstaller = `
-import subprocess
-import sys
-
-requirements = sys.argv[1]
-bootstrap = subprocess.run([sys.executable, "-m", "ensurepip", "--upgrade"], capture_output=True, text=True)
-if bootstrap.returncode != 0:
-    print(bootstrap.stdout)
-    print(bootstrap.stderr, file=sys.stderr)
-    raise SystemExit(bootstrap.returncode)
-install = subprocess.run([sys.executable, "-m", "pip", "install", "-r", requirements], capture_output=True, text=True)
-print(install.stdout)
-print(install.stderr, file=sys.stderr)
-raise SystemExit(install.returncode)
-`;
-
 const runtimeProbe = `
 import importlib.util
 import json
@@ -80,7 +64,16 @@ function checkPythonRuntime(): Promise<Record<string, unknown>> {
 const projectRoot = path.resolve(process.cwd());
 const experimentsDirectory = path.join(projectRoot, "data", "experiments");
 const pythonCommand = process.env.PYTHON_BIN ?? "python3";
-let installationState: { status: "idle" | "running" | "complete" | "failed"; detail?: string } = { status: "idle" };
+let workerConfig = {
+  provider: process.env.ML_WORKER_PROVIDER ?? "",
+  endpoint: process.env.ML_WORKER_ENDPOINT ?? "",
+  model: process.env.ML_WORKER_MODEL ?? "openai/whisper-small",
+  apiKey: process.env.ML_WORKER_API_KEY ?? "",
+};
+let workerConnection: { status: "unconfigured" | "testing" | "connected" | "failed"; detail: string; checkedAt?: string } = {
+  status: workerConfig.endpoint && workerConfig.apiKey ? "failed" : "unconfigured",
+  detail: workerConfig.endpoint && workerConfig.apiKey ? "Worker connection has not been tested." : "No external ML worker is configured.",
+};
 
 function readExperiment(id: string) {
   const filePath = path.join(experimentsDirectory, `${id}.json`);
@@ -93,22 +86,127 @@ function readExperiments() {
   return readdirSync(experimentsDirectory).filter((name) => name.endsWith(".json")).map((name) => JSON.parse(readFileSync(path.join(experimentsDirectory, name), "utf8"))).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-function runPipeline(args: string[], experimentId: string) {
-  mkdirSync(experimentsDirectory, { recursive: true });
-  const child = spawn(pythonCommand, [path.join(projectRoot, "ml", "pipeline.py"), ...args], { cwd: projectRoot, env: process.env, stdio: "ignore" });
-  child.on("error", (error) => {
-    const filePath = path.join(experimentsDirectory, `${experimentId}.json`);
-    if (existsSync(filePath)) {
-      const experiment = JSON.parse(readFileSync(filePath, "utf8"));
-      experiment.status = "failed";
-      experiment.error = `${error.name}: ${error.message}`;
-      experiment.updatedAt = new Date().toISOString();
-      writeFileSync(filePath, JSON.stringify(experiment, null, 2));
-    }
-  });
+function publicWorkerConfig() {
+  return { provider: workerConfig.provider, endpoint: workerConfig.endpoint, model: workerConfig.model, hasApiKey: Boolean(workerConfig.apiKey) };
 }
 
+function workerUrl(pathname: string) {
+  if (!workerConfig.endpoint) throw new Error("External ML worker endpoint is not configured.");
+  return `${workerConfig.endpoint.replace(/\/$/, "")}${pathname}`;
+}
+
+async function requestWorker(pathname: string, method: "GET" | "POST", body?: unknown) {
+  const response = await fetch(workerUrl(pathname), {
+    method,
+    headers: { Accept: "application/json", "Content-Type": "application/json", Authorization: `Bearer ${workerConfig.apiKey}` },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(method === "GET" ? 30000 : 120000),
+  });
+  const text = await response.text();
+  let payload: unknown = null;
+  try {
+    payload = text ? JSON.parse(text) : null;
+  } catch {
+    payload = { error: text || `Worker returned HTTP ${response.status}.` };
+  }
+  if (!response.ok) {
+    const detail = payload && typeof payload === "object" && "error" in payload ? String(payload.error) : `Worker returned HTTP ${response.status}.`;
+    throw new Error(detail);
+  }
+  return payload as Record<string, unknown>;
+}
+
+async function testWorkerConnection() {
+  if (!workerConfig.endpoint || !workerConfig.apiKey) {
+    workerConnection = { status: "unconfigured", detail: "Set a worker endpoint and API key before testing." };
+    return workerConnection;
+  }
+  workerConnection = { status: "testing", detail: "Testing authenticated external ML worker." };
+  try {
+    await requestWorker("/health", "POST", { model: workerConfig.model });
+    workerConnection = { status: "connected", detail: "Authenticated external ML worker responded successfully.", checkedAt: new Date().toISOString() };
+  } catch (error) {
+    workerConnection = { status: "failed", detail: error instanceof Error ? error.message : "External ML worker health check failed.", checkedAt: new Date().toISOString() };
+  }
+  return workerConnection;
+}
+
+function persistWorkerFailure(experimentId: string, stage: string, error: unknown) {
+  const pathToExperiment = path.join(experimentsDirectory, `${experimentId}.json`);
+  const experiment = readExperiment(experimentId);
+  if (!experiment) return;
+  experiment.status = "failed";
+  experiment.stage = stage;
+  experiment.error = error instanceof Error ? error.message : String(error);
+  experiment.updatedAt = new Date().toISOString();
+  writeFileSync(pathToExperiment, JSON.stringify(experiment, null, 2));
+}
+
+function persistWorkerPayload(experimentId: string, payload: Record<string, unknown>) {
+  const current = readExperiment(experimentId) ?? { id: experimentId };
+  const next = payload.experiment && typeof payload.experiment === "object" ? payload.experiment as Record<string, unknown> : payload;
+  const merged = { ...current, ...next, id: experimentId, updatedAt: new Date().toISOString() };
+  writeFileSync(path.join(experimentsDirectory, `${experimentId}.json`), JSON.stringify(merged, null, 2));
+  return merged;
+}
+
+async function runWorkerStage(stage: "dataset" | "baseline" | "finetune" | "evaluate", experimentId: string, body: Record<string, unknown>) {
+  try {
+    if (workerConnection.status !== "connected") {
+      const connection = await testWorkerConnection();
+      if (connection.status !== "connected") throw new Error(connection.detail);
+    }
+    persistWorkerPayload(experimentId, { status: "running", stage });
+    const initial = await requestWorker(`/${stage === "dataset" ? "prepare" : stage}`, "POST", { experimentId, model: workerConfig.model, ...body });
+    const initialExperiment = persistWorkerPayload(experimentId, initial);
+    if (initialExperiment.status !== "running") return;
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      const current = await requestWorker(`/experiments/${experimentId}`, "GET");
+      const updated = persistWorkerPayload(experimentId, current);
+      if (updated.status !== "running") return;
+    }
+  } catch (error) {
+    persistWorkerFailure(experimentId, stage, error);
+  }
+}
+
+export const getWorkerConfig: RequestHandler = (_req, res) => {
+  res.json({ config: publicWorkerConfig(), connection: workerConnection });
+};
+
+export const saveWorkerConfig: RequestHandler = (req, res) => {
+  const body = req.body as { provider?: string; endpoint?: string; model?: string; apiKey?: string };
+  const endpoint = String(body.endpoint ?? "").trim().replace(/\/$/, "");
+  if (endpoint && !endpoint.startsWith("https://")) return res.status(400).json({ error: "The ML worker endpoint must use HTTPS." });
+  workerConfig = {
+    provider: String(body.provider ?? "").trim(),
+    endpoint,
+    model: String(body.model ?? "").trim() || "openai/whisper-small",
+    apiKey: String(body.apiKey ?? "").trim() || workerConfig.apiKey,
+  };
+  workerConnection = { status: workerConfig.endpoint && workerConfig.apiKey ? "failed" : "unconfigured", detail: workerConfig.endpoint && workerConfig.apiKey ? "Worker configuration saved. Test the connection before running an experiment." : "Worker endpoint and API key are required." };
+  res.json({ config: publicWorkerConfig(), connection: workerConnection });
+};
+
+export const testWorker: RequestHandler = async (_req, res) => {
+  const connection = await testWorkerConnection();
+  res.status(connection.status === "connected" ? 200 : 502).json({ config: publicWorkerConfig(), connection });
+};
+
 export const getRuntimeStatus: RequestHandler = async (_req, res) => {
+  if (workerConnection.status === "connected") {
+    const detail = workerConnection.detail;
+    res.json({
+      checkedAt: workerConnection.checkedAt ?? new Date().toISOString(),
+      runtime: { status: "available", detail },
+      whisper: { status: "available", detail: "External worker health check confirmed Whisper runtime availability." },
+      dataset: { status: "available", detail: "External worker is ready to inspect Common Voice; dataset results are not loaded yet." },
+      evaluation: { status: "available", detail: "External worker is ready to calculate WER/CER after inference." },
+      fineTuning: { status: "available", detail: "External worker is ready for balanced fine-tuning after a completed baseline." },
+    });
+    return;
+  }
   const result = await checkPythonRuntime();
   const missing = Array.isArray(result.missing) ? result.missing as string[] : [];
   const available = result.available === true;
@@ -121,34 +219,6 @@ export const getRuntimeStatus: RequestHandler = async (_req, res) => {
     evaluation: { status: available && missing.length === 0 ? "available" : "unavailable", detail: available && missing.length === 0 ? "WER/CER dependencies are available." : dependencyDetail },
     fineTuning: { status: available && missing.length === 0 ? "available" : "unavailable", detail: available && missing.length === 0 ? `Training dependencies are available${result.cuda ? " with CUDA detected" : " on CPU"}.` : dependencyDetail },
   });
-};
-
-export const installRuntimeDependencies: RequestHandler = (_req, res) => {
-  if (installationState.status === "running") {
-    res.status(202).json({ ...installationState });
-    return;
-  }
-  installationState = { status: "running", detail: "Installing ML dependencies from ml/requirements.txt." };
-  const child = spawn(pythonCommand, ["-c", dependencyInstaller, path.join(projectRoot, "ml", "requirements.txt")], { cwd: projectRoot, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
-  let output = "";
-  child.stdout.on("data", (chunk) => { output += chunk.toString(); });
-  child.stderr.on("data", (chunk) => { output += chunk.toString(); });
-  child.on("error", (error) => {
-    installationState = { status: "failed", detail: `${error.name}: ${error.message}` };
-  });
-  child.on("close", (code) => {
-    if (code === 0) {
-      installationState = { status: "complete", detail: "ML dependencies installed. Run the runtime check again." };
-      return;
-    }
-    const detail = output.trim().split("\\n").slice(-8).join("\\n");
-    installationState = { status: "failed", detail: detail || `pip exited with code ${code}.` };
-  });
-  res.status(202).json({ ...installationState });
-};
-
-export const getInstallationStatus: RequestHandler = (_req, res) => {
-  res.json({ ...installationState });
 };
 
 export const listExperiments: RequestHandler = (_req, res) => {
@@ -167,22 +237,24 @@ export const getExperiment: RequestHandler = (req, res) => {
 
 export const prepareExperiment: RequestHandler = (_req, res) => {
   const experimentId = randomUUID();
-  runPipeline(["prepare", "--experiment-id", experimentId], experimentId);
+  mkdirSync(experimentsDirectory, { recursive: true });
+  const now = new Date().toISOString();
+  writeFileSync(path.join(experimentsDirectory, `${experimentId}.json`), JSON.stringify({ id: experimentId, status: "running", stage: "dataset", createdAt: now, updatedAt: now }, null, 2));
+  void runWorkerStage("dataset", experimentId, {});
   res.status(202).json({ experimentId, status: "running", stage: "dataset" });
 };
 
 export const runExperimentStage: RequestHandler = (req, res) => {
   const experimentId = String(req.params.id);
-  if (!readExperiment(experimentId)) return res.status(404).json({ error: "Experiment not found." });
-  const stage = String(req.params.stage);
+  const experiment = readExperiment(experimentId);
+  if (!experiment) return res.status(404).json({ error: "Experiment not found." });
+  const stage = String(req.params.stage) as "baseline" | "finetune" | "evaluate";
   if (!["baseline", "finetune", "evaluate"].includes(stage)) return res.status(400).json({ error: "Unsupported experiment stage." });
-  const body = req.body as { checkpoint?: string; epochs?: number; learningRate?: number; batchSize?: number; seed?: number };
-  const args = [stage, "--experiment-id", experimentId];
-  if (body.checkpoint) args.push("--checkpoint", body.checkpoint);
-  if (stage === "finetune") {
-    args.push("--epochs", String(body.epochs ?? 3), "--learning-rate", String(body.learningRate ?? 0.00001), "--batch-size", String(body.batchSize ?? 4), "--seed", String(body.seed ?? 42));
-  }
-  if (stage === "evaluate" && !body.checkpoint) return res.status(400).json({ error: "A fine-tuned checkpoint is required for evaluation." });
-  runPipeline(args, experimentId);
+  if (experiment.status === "running") return res.status(409).json({ error: "Another experiment stage is already running." });
+  if (stage === "baseline" && !experiment.dataset) return res.status(409).json({ error: "Prepare the Common Voice dataset before running the baseline." });
+  if (stage === "finetune" && !experiment.baseline) return res.status(409).json({ error: "A completed baseline is required before fine-tuning." });
+  if (stage === "evaluate" && !experiment.model?.fineTunedCheckpoint) return res.status(409).json({ error: "A completed fine-tuned checkpoint is required before evaluation." });
+  const body = req.body as Record<string, unknown>;
+  void runWorkerStage(stage, experimentId, body);
   res.status(202).json({ experimentId, status: "running", stage });
 };

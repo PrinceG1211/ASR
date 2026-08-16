@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { handleDemo } from "./routes/demo";
-import { getExperiment, getInstallationStatus, getLatestExperiment, getRuntimeStatus, installRuntimeDependencies, listExperiments, prepareExperiment, runExperimentStage } from "./routes/experiments";
+import { getExperiment, getLatestExperiment, getRuntimeStatus, getWorkerConfig, listExperiments, prepareExperiment, runExperimentStage, saveWorkerConfig, testWorker } from "./routes/experiments";
 
 export function createServer() {
   const app = express();
@@ -19,8 +19,9 @@ export function createServer() {
   });
 
   app.get("/api/experiments/runtime", getRuntimeStatus);
-  app.get("/api/experiments/runtime/install", getInstallationStatus);
-  app.post("/api/experiments/runtime/install", installRuntimeDependencies);
+  app.get("/api/experiments/worker", getWorkerConfig);
+  app.put("/api/experiments/worker", saveWorkerConfig);
+  app.post("/api/experiments/worker/test", testWorker);
   app.get("/api/demo", handleDemo);
   app.get("/api/experiments", listExperiments);
   app.get("/api/experiments/latest", getLatestExperiment);

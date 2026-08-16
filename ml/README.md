@@ -39,3 +39,29 @@ python ml/pipeline.py evaluate --experiment-id <experiment-id> --checkpoint data
 `prepare` downloads Mozilla Common Voice 17.0 English, uses the dataset's accent metadata, writes real audio and a speaker-level split manifest under `data/`, and persists dataset statistics in `data/experiments/<experiment-id>.json`. Missing target accent groups are reported rather than filled with synthetic data. Baseline and fine-tuned evaluation read the same test rows from that manifest.
 
 The Express API starts these stages asynchronously. If Python, a package, the dataset, the model, or hardware fails, the experiment JSON is marked `failed` with the exception type and message; no experimental metric is generated.
+
+## External worker contract
+
+The Builder server can delegate execution to an authenticated HTTPS Python worker. Configure the provider, endpoint, model, and secret from the Admin Dashboard or with server-side environment variables:
+
+```text
+ML_WORKER_PROVIDER
+ML_WORKER_ENDPOINT
+ML_WORKER_MODEL
+ML_WORKER_API_KEY
+```
+
+The worker must implement these JSON endpoints under the configured base endpoint:
+
+```text
+POST /health
+POST /prepare
+POST /baseline
+POST /finetune
+POST /evaluate
+GET  /experiments/:id
+```
+
+Every stage response must include the experiment state, either directly or under an `experiment` property. The state must use the existing experiment JSON shape and must remain `running` until the real operation finishes. The Builder server polls `GET /experiments/:id` and persists the returned state. Worker requests use `Authorization: Bearer <server-side-secret>`; the secret is never returned to the client.
+
+`/health` must only report success when the worker can load its configured Whisper/runtime dependencies. `/prepare` must run Common Voice preparation, `/baseline` must generate real held-out Whisper predictions and WER/CER, `/finetune` must create a real checkpoint after a completed baseline, and `/evaluate` must evaluate the same test manifest.

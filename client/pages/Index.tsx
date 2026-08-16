@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { ExperimentStage, ExperimentSummary, RuntimeStatusResponse } from "@shared/experiment";
+import type { ExperimentStage, ExperimentSummary, MlWorkerConfig, MlWorkerConnection, RuntimeStatusResponse } from "@shared/experiment";
 import {
   Activity,
   ArrowDownRight,
@@ -509,7 +509,8 @@ export default function Index() {
   const [analysisStatus, setAnalysisStatus] = useState("idle");
   const [experiment, setExperiment] = useState<ExperimentSummary | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatusResponse | null>(null);
-  const [runtimeInstallRequest, setRuntimeInstallRequest] = useState(false);
+  const [workerConfig, setWorkerConfig] = useState<MlWorkerConfig | null>(null);
+  const [workerConnection, setWorkerConnection] = useState<MlWorkerConnection>({ status: "unconfigured", detail: "No external ML worker is configured." });
   const [experimentRequest, setExperimentRequest] = useState(false);
 
   const refreshExperiment = async () => {
@@ -534,38 +535,47 @@ export default function Index() {
     }
   };
 
+  const checkWorkerConfig = async () => {
+    try {
+      const response = await fetch("/api/experiments/worker");
+      if (!response.ok) throw new Error("Worker configuration unavailable");
+      const payload = await response.json() as { config: MlWorkerConfig; connection: MlWorkerConnection };
+      setWorkerConfig(payload.config);
+      setWorkerConnection(payload.connection);
+    } catch {
+      setWorkerConfig(null);
+      setWorkerConnection({ status: "failed", detail: "External worker configuration could not be loaded." });
+    }
+  };
+
+  const saveWorkerConfig = async (config: { provider: string; endpoint: string; model: string; apiKey?: string }) => {
+    const response = await fetch("/api/experiments/worker", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(config) });
+    const payload = await response.json() as { config?: MlWorkerConfig; connection?: MlWorkerConnection; error?: string };
+    if (!response.ok || !payload.config || !payload.connection) throw new Error(payload.error || "Worker configuration could not be saved.");
+    setWorkerConfig(payload.config);
+    setWorkerConnection(payload.connection);
+    toast.success("ML worker configuration saved on the server.");
+  };
+
+  const testWorkerConnection = async () => {
+    const response = await fetch("/api/experiments/worker/test", { method: "POST" });
+    const payload = await response.json() as { config: MlWorkerConfig; connection: MlWorkerConnection };
+    setWorkerConfig(payload.config);
+    setWorkerConnection(payload.connection);
+    if (payload.connection.status === "connected") toast.success("External ML worker connection verified.");
+    else toast.error(payload.connection.detail);
+  };
+
   useEffect(() => {
     void refreshExperiment();
   }, []);
 
   useEffect(() => {
-    if (session?.role === "admin") void checkRuntime();
-  }, [session?.role]);
-
-  const installRuntime = async () => {
-    if (runtimeInstallRequest) return;
-    setRuntimeInstallRequest(true);
-    try {
-      const response = await fetch("/api/experiments/runtime/install", { method: "POST" });
-      const initial = await response.json() as { status?: string; detail?: string };
-      if (!response.ok) throw new Error(initial.detail || "ML dependency installation could not start.");
-      const poll = window.setInterval(async () => {
-        const status = await fetch("/api/experiments/runtime/install").then((result) => result.json() as Promise<{ status?: string; detail?: string }>);
-        if (status.status === "running") return;
-        window.clearInterval(poll);
-        setRuntimeInstallRequest(false);
-        if (status.status === "complete") {
-          toast.success(status.detail || "ML dependencies installed.");
-          await checkRuntime();
-        } else {
-          toast.error(status.detail || "ML dependency installation failed.");
-        }
-      }, 2000);
-    } catch (error) {
-      setRuntimeInstallRequest(false);
-      toast.error(error instanceof Error ? error.message : "ML dependency installation failed.");
+    if (session?.role === "admin") {
+      void checkRuntime();
+      void checkWorkerConfig();
     }
-  };
+  }, [session?.role]);
 
   const runExperimentStage = async (stage: ExperimentStage) => {
     if (experimentRequest) return;
@@ -618,7 +628,7 @@ export default function Index() {
   };
 
   if (!session) return <AuthScreen onAuthenticated={(nextSession) => { setSession(nextSession); setActiveView(nextSession.role === "admin" ? "admin" : "home"); }} />;
-  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} experiment={experiment} runtimeStatus={runtimeStatus} checkRuntime={checkRuntime} installRuntime={installRuntime} runtimeInstallRequest={runtimeInstallRequest} goTo={goTo} logout={logout} runStage={runExperimentStage} />;
+  if (session.role === "admin" && activeView === "admin") return <AdminDashboard evaluations={evaluations} experiment={experiment} runtimeStatus={runtimeStatus} checkRuntime={checkRuntime} workerConfig={workerConfig} workerConnection={workerConnection} saveWorkerConfig={saveWorkerConfig} testWorkerConnection={testWorkerConnection} goTo={goTo} logout={logout} runStage={runExperimentStage} />;
   if (session.role === "client" && activeView === "home") return <ClientDashboard session={session} evaluations={evaluations} goTo={goTo} logout={logout} downloadTextFile={downloadTextFile} experiment={experiment} />;
 
   return <ClientWorkspace session={session} activeView={activeView} goTo={goTo} logout={logout} sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen} transcript={transcript} setTranscript={setTranscript} experiment={experiment} />;
