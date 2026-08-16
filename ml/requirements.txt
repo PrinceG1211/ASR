@@ -1,7 +1,14 @@
 datasets>=2.19
-transformers>=4.40
-torch>=2.2
-torchaudio>=2.2
-accelerate>=0.28
-jiwer>=3.0
-soundfile>=0.12
+# Python 3.10 or 3.11
+# Install a platform-appropriate PyTorch build first when CUDA is required.
+torch>=2.2,<3
+torchaudio>=2.2,<3
+transformers>=4.40,<5
+datasets>=2.19,<4
+evaluate>=0.4,<1
+accelerate>=0.28,<2
+jiwer>=3.0,<5
+librosa>=0.10,<1
+soundfile>=0.12,<1
+pandas>=2.0,<3
+numpy>=1.24,<3

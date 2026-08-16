@@ -4,7 +4,6 @@ import argparse
 import csv
 import hashlib
 import json
-import os
 import platform
 import sys
 import time
@@ -39,16 +38,20 @@ class Sample:
 
 
 def accent_group(value: Any) -> str | None:
-    normalized = str(value or "").strip().lower()
+    values_to_check = value if isinstance(value, list) else [value]
     aliases = {
         "american": ("american", "united states", "usa", "us"),
         "indian": ("indian", "india", "in"),
         "nigerian": ("nigerian", "nigeria", "ng"),
         "scottish": ("scottish", "scotland", "sco"),
     }
-    for group, values in aliases.items():
-        if normalized in values or any(value in normalized for value in values if len(value) > 2):
-            return group
+    for candidate in values_to_check:
+        normalized = str(candidate or "").strip().lower()
+        for group, aliases_for_group in aliases.items():
+            if normalized in aliases_for_group or any(
+                alias in normalized for alias in aliases_for_group if len(alias) > 2
+            ):
+                return group
     return None
 
 
@@ -107,10 +110,15 @@ def prepare_dataset(args: argparse.Namespace) -> None:
         dataset = load_dataset("mozilla-foundation/common_voice_17_0", "en", split="train", trust_remote_code=True)
         if "audio" not in dataset.column_names or "client_id" not in dataset.column_names:
             raise RuntimeError("The loaded Common Voice version does not expose audio and client_id columns.")
+        accent_column = next((column for column in ("accent", "accents") if column in dataset.column_names), None)
+        if accent_column is None:
+            raise RuntimeError(
+                "The loaded Common Voice version does not expose an accent metadata column (expected accent or accents)."
+            )
         dataset = dataset.cast_column("audio", Audio(sampling_rate=None))
         rows: list[Sample] = []
         for index, item in enumerate(dataset):
-            group = accent_group(item.get("accent"))
+            group = accent_group(item.get(accent_column))
             sentence = str(item.get("sentence") or "").strip()
             client_id = str(item.get("client_id") or "").strip()
             audio = item.get("audio") or {}
@@ -138,7 +146,7 @@ def prepare_dataset(args: argparse.Namespace) -> None:
             entry[f"{row.split}Samples"] += 1
         accents = [{"accent": group, "label": TARGETS[group], "speakers": len(stats[group]["speakers"]), "samples": stats[group]["samples"], "durationSeconds": round(stats[group]["durationSeconds"], 3), "trainSamples": stats[group]["trainSamples"], "validationSamples": stats[group]["validationSamples"], "testSamples": stats[group]["testSamples"]} for group in TARGETS]
         available = {entry["accent"] for entry in accents if entry["samples"] > 0}
-        summary = {"dataset": "Mozilla Common Voice", "version": "17.0", "language": "en", "accents": accents, "speakers": len({row.client_id for row in rows}), "samples": len(rows), "durationSeconds": round(sum(row.duration_seconds for row in rows), 3), "trainSamples": sum(row.split == "train" for row in rows), "validationSamples": sum(row.split == "validation" for row in rows), "testSamples": sum(row.split == "test" for row in rows), "insufficientAccents": [group for group in TARGETS if group not in available], "generatedAt": now, "manifest": str(manifest.relative_to(ROOT))}
+        summary = {"dataset": "Mozilla Common Voice", "version": "17.0", "language": "en", "accents": accents, "speakers": len({row.client_id for row in rows}), "samples": len(rows), "durationSeconds": round(sum(row.duration_seconds for row in rows), 3), "trainSamples": sum(row.split == "train" for row in rows), "validationSamples": sum(row.split == "validation" for row in rows), "testSamples": sum(row.split == "test" for row in rows), "insufficientAccents": [group for group in TARGETS if group not in available], "splitSeed": args.seed, "splitStrategy": "sha256 speaker-level 80/10/10", "generatedAt": now, "manifest": str(manifest.relative_to(ROOT))}
         update_experiment(experiment_id, status="complete", stage="dataset", dataset=summary)
     except Exception as error:
         update_experiment(experiment_id, status="failed", stage="dataset", error=f"{type(error).__name__}: {error}")
@@ -162,6 +170,7 @@ def transcribe(checkpoint: str, rows: list[dict[str, Any]], output_path: Path) -
     model = WhisperForConditionalGeneration.from_pretrained(checkpoint)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
+    model.eval()
     results = []
     for row in rows:
         audio, sample_rate = sf.read(ROOT / row["audio_path"])
@@ -198,8 +207,11 @@ def run_baseline(args: argparse.Namespace) -> None:
         rows = load_manifest(args.experiment_id, "test")
         output = EXPERIMENTS_DIR / f"{args.experiment_id}-baseline-predictions.json"
         predictions = transcribe(args.checkpoint, rows, output)
+        import torch
+
         metrics = evaluate_predictions(predictions)
-        update_experiment(args.experiment_id, status="complete", stage="baseline", model={"baselineCheckpoint": args.checkpoint, "hardware": "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else platform.processor()}, baseline=metrics)
+        hardware = "cuda" if torch.cuda.is_available() else (platform.processor() or "cpu")
+        update_experiment(args.experiment_id, status="complete", stage="baseline", model={"baselineCheckpoint": args.checkpoint, "hardware": hardware}, baseline=metrics)
     except Exception as error:
         update_experiment(args.experiment_id, status="failed", stage="baseline", error=f"{type(error).__name__}: {error}")
         raise
@@ -222,6 +234,12 @@ def run_finetune(args: argparse.Namespace) -> None:
     counts = defaultdict(int)
     for row in train_rows:
         counts[row["accent"]] += 1
+    missing_groups = [group for group in TARGETS if counts[group] == 0]
+    if missing_groups:
+        raise RuntimeError(
+            "Balanced fine-tuning requires all target accent groups in the training split; "
+            f"missing: {', '.join(missing_groups)}."
+        )
     target_count = min(counts.values())
     balanced_rows = []
     for group in TARGETS:
