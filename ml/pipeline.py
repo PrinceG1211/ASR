@@ -184,9 +184,11 @@ def transcribe(checkpoint: str, rows: list[dict[str, Any]], output_path: Path) -
     return results
 
 
-def evaluate_predictions(predictions: list[dict[str, Any]]) -> dict[str, Any]:
+def evaluate_predictions(predictions: list[dict[str, Any]], metric_prefix: str = "baseline") -> dict[str, Any]:
     from jiwer import cer, wer
 
+    wer_key = f"{metric_prefix}Wer"
+    cer_key = f"{metric_prefix}Cer"
     by_accent: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in predictions:
         by_accent[row["accent"]].append(row)
@@ -194,12 +196,12 @@ def evaluate_predictions(predictions: list[dict[str, Any]]) -> dict[str, Any]:
     for group in TARGETS:
         rows = by_accent.get(group, [])
         if not rows:
-            stats.append({"accent": group, "label": TARGETS[group], "samples": 0, "speakers": 0, "baselineWer": None, "baselineCer": None})
+            stats.append({"accent": group, "label": TARGETS[group], "samples": 0, "speakers": 0, wer_key: None, cer_key: None})
             continue
-        stats.append({"accent": group, "label": TARGETS[group], "samples": len(rows), "speakers": len({row["client_id"] for row in rows}), "baselineWer": wer([row["sentence"] for row in rows], [row["prediction"] for row in rows]), "baselineCer": cer([row["sentence"] for row in rows], [row["prediction"] for row in rows])})
-    valid = [row for row in stats if row["baselineWer"] is not None]
-    wers = [row["baselineWer"] for row in valid]
-    return {"accents": stats, "meanWer": sum(wers) / len(wers) if wers else None, "meanCer": sum(row["baselineCer"] for row in valid) / len(valid) if valid else None, "bestWer": min(wers) if wers else None, "worstWer": max(wers) if wers else None, "gap": max(wers) - min(wers) if wers else None}
+        stats.append({"accent": group, "label": TARGETS[group], "samples": len(rows), "speakers": len({row["client_id"] for row in rows}), wer_key: wer([row["sentence"] for row in rows], [row["prediction"] for row in rows]), cer_key: cer([row["sentence"] for row in rows], [row["prediction"] for row in rows])})
+    valid = [row for row in stats if row[wer_key] is not None]
+    wers = [row[wer_key] for row in valid]
+    return {"accents": stats, "meanWer": sum(wers) / len(wers) if wers else None, "meanCer": sum(row[cer_key] for row in valid) / len(valid) if valid else None, "bestWer": min(wers) if wers else None, "worstWer": max(wers) if wers else None, "gap": max(wers) - min(wers) if wers else None}
 
 
 def run_baseline(args: argparse.Namespace) -> None:
@@ -286,7 +288,7 @@ def run_finetuned_evaluation(args: argparse.Namespace) -> None:
         rows = load_manifest(args.experiment_id, "test")
         output = EXPERIMENTS_DIR / f"{args.experiment_id}-finetuned-predictions.json"
         predictions = transcribe(args.checkpoint, rows, output)
-        metrics = evaluate_predictions(predictions)
+        metrics = evaluate_predictions(predictions, "tuned")
         baseline = read_json(EXPERIMENTS_DIR / f"{args.experiment_id}.json").get("baseline")
         if baseline and metrics.get("gap") is not None and baseline.get("gap") is not None:
             metrics["gapReduction"] = baseline["gap"] - metrics["gap"]
