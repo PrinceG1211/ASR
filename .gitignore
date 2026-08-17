@@ -12,6 +12,12 @@ dist
 dist-ssr
 *.local
 
+# ML worker secrets, caches, manifests, audio, and checkpoints
+.env
+worker/data/
+worker/*.pyc
+worker/__pycache__/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -24,4 +30,4 @@ dist-ssr
 *.sw?
 
 .config/
-!.env
+!.env.example

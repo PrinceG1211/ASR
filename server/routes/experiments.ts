@@ -123,8 +123,12 @@ async function testWorkerConnection() {
   }
   workerConnection = { status: "testing", detail: "Testing authenticated external ML worker." };
   try {
-    await requestWorker("/health", "POST", { model: workerConfig.model });
-    workerConnection = { status: "connected", detail: "Authenticated external ML worker responded successfully.", checkedAt: new Date().toISOString() };
+    const health = await requestWorker("/health", "POST", { model: workerConfig.model });
+    if (health.status !== "healthy") {
+      const missing = Array.isArray(health.missing) ? ` Missing: ${(health.missing as unknown[]).join(", ")}.` : "";
+      throw new Error(`External ML worker is unhealthy.${missing}`);
+    }
+    workerConnection = { status: "connected", detail: "Authenticated external ML worker responded healthy.", checkedAt: new Date().toISOString() };
   } catch (error) {
     workerConnection = { status: "failed", detail: error instanceof Error ? error.message : "External ML worker health check failed.", checkedAt: new Date().toISOString() };
   }
